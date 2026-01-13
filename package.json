@@ -3,7 +3,7 @@
   "displayName": "Pipeline Visualizer",
   "description": "Visualize Azure DevOps and GitHub Actions YAML pipelines with interactive diagrams",
   "version": "1.0.0",
-  "publisher": "your-publisher-name",
+  "publisher": "DannydeHaan",
   "icon": "icon.png",
   "repository": {
     "type": "git",
