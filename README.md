@@ -2,7 +2,7 @@
 
 Visualize your Azure DevOps and GitHub Actions YAML pipeline files directly in VS Code with beautiful, interactive diagrams!
 
-🔗 **[GitHub Repository](https://github.com/ThatInfraDba/PipelineVisualizer)** | 📦 **[VS Code Marketplace](https://marketplace.visualstudio.com/)** (Coming Soon) | 💖 **[Sponsor this Project](https://github.com/sponsors/ThatInfraDba)**
+🔗 **[GitHub Repository](https://github.com/ThatInfraDba/PipelineVisualizer)** | 📦 **[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=DannydeHaan.pipeline-visualizer)** | 💖 **[Sponsor this Project](https://github.com/sponsors/ThatInfraDba)**
 
 ## Features
 
@@ -16,6 +16,25 @@ Visualize your Azure DevOps and GitHub Actions YAML pipeline files directly in V
 - **🌈 Platform Theming** - Azure (blue/purple) and GitHub (blue) themed visualizations
 - **⚡ Instant Visualization** - Works directly from the editor with no external tools needed
 - **📁 Context Menu Integration** - Right-click any YAML file to visualize
+
+## Installation
+
+### From VS Code Marketplace
+
+1. Open VS Code
+2. Go to Extensions (`Ctrl+Shift+X` / `Cmd+Shift+X`)
+3. Search for "Pipeline Visualizer"
+4. Click **Install**
+
+**Or install directly:**
+- [Open in VS Code](vscode:extension/DannydeHaan.pipeline-visualizer)
+- [Marketplace Page](https://marketplace.visualstudio.com/items?itemName=DannydeHaan.pipeline-visualizer)
+
+### From Command Line
+
+```bash
+code --install-extension DannydeHaan.pipeline-visualizer
+```
 
 ## Usage
 
