@@ -112,6 +112,15 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.0.3
+
+Approval Gates Support:
+- Manual approval gates visualization for Azure DevOps pipelines
+- Shows approvers, timeout settings, and instructions in dedicated sections
+- Protected environment indicators for GitHub Actions workflows
+- Improved readability with better color contrast
+- Bug fixes for visualization rendering
+
 ### 1.0.0
 
 Initial release of Pipeline Visualizer:

@@ -174,6 +174,12 @@ export class PipelineVisualizerPanel {
         .modal-body dt { font-weight: bold; color: var(--accent-color); }
         .modal-body dd { margin: 0; padding: 8px; background: var(--vscode-textBlockQuote-background); border-radius: 4px; }
         .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; margin-left: 10px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+        .approval { background: #fff3cd; border: 2px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 6px; }
+        .approval h4 { margin-top: 0; color: #856404; font-size: 16px; font-weight: 600; }
+        .approval p { margin: 8px 0; color: #333; font-size: 14px; }
+        .approval strong { color: #664d03; font-weight: 600; }
+        .approval-badge { display: inline-block; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; margin: 10px 0; background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%); color: white; }
+        .approval-info { padding: 8px 12px; margin: 8px 0; background: rgba(255, 165, 0, 0.15); border-left: 4px solid #FFA500; border-radius: 4px; font-size: 13px; color: var(--vscode-foreground); }
     </style>
 </head>
 <body class="${platformClass}">
@@ -414,17 +420,74 @@ export class PipelineVisualizerPanel {
                     html += \`<div id="S\${idx}" class="stage" style="border-color: \${color}; background: linear-gradient(135deg, \${color}33 0%, \${color}14 100%);"><h2 style="background: \${color}; color: white;">🔨 \${stage.displayName || stage.stage}</h2>\`;
                     if (stage.jobs) {
                         stage.jobs.forEach((job, jidx) => {
-                            html += \`<div class="job"><h3>\${job.displayName || job.job}</h3>\`;
-                            if (job.steps) {
-                                html += '<ul class="steps">';
-                                job.steps.forEach(step => {
-                                    const sid = \`step_\${stepCounter++}\`;
-                                    allSteps[sid] = step;
-                                    html += \`<li onclick="showStepDetails('\${sid}')">▶️ \${step.displayName || step.script?.substring(0, 50) || step.task || 'Step'}</li>\`;
-                                });
-                                html += '</ul>';
+                            try {
+                                // Check if this is a manual validation/approval job
+                                const isManualValidation = job.steps && job.steps.some(step => 
+                                    step.task && (step.task.includes('ManualValidation') || step.task.includes('ManualIntervention'))
+                                );
+                                const isServerPool = job.pool === 'server';
+                                
+                                if (isManualValidation || isServerPool) {
+                                    // Render as approval gate
+                                    const step = job.steps?.[0];
+                                    const timeout = job.timeoutInMinutes || 'Not specified';
+                                    
+                                    html += '<div class="approval">';
+                                    html += '<h4>⏸️ Manual Approval Gate</h4>';
+                                    html += \`<p><strong>Job:</strong> \${job.displayName || job.job}</p>\`;
+                                    
+                                    if (step?.inputs?.approvers) {
+                                        const approvers = String(step.inputs.approvers).trim().split(/[\\n,]/).filter(a => a.trim()).join(', ');
+                                        html += \`<p><strong>Approvers:</strong> \${approvers}</p>\`;
+                                    }
+                                    
+                                    if (step?.inputs?.notifyUsers) {
+                                        const notifyUsers = String(step.inputs.notifyUsers).trim().split(/[\\n,]/).filter(n => n.trim()).join(', ');
+                                        html += \`<p><strong>Notify:</strong> \${notifyUsers}</p>\`;
+                                    }
+                                    
+                                    html += \`<p><strong>Timeout:</strong> \${timeout} minutes\`;
+                                    
+                                    if (step?.inputs?.onTimeout) {
+                                        html += \` | <strong>On Timeout:</strong> \${step.inputs.onTimeout}\`;
+                                    }
+                                    
+                                    html += '</p>';
+                                    
+                                    if (step?.inputs?.instructions) {
+                                        html += \`<p><strong>Instructions:</strong> \${step.inputs.instructions}</p>\`;
+                                    }
+                                    
+                                    html += '</div>';
+                                } else {
+                                    // Regular job
+                                    html += \`<div class="job"><h3>\${job.displayName || job.job}</h3>\`;
+                                    
+                                    // Show deployment/environment info
+                                    if (job.deployment) {
+                                        html += \`<div class="approval-badge">🔒 Deployment Job</div>\`;
+                                        if (job.environment) {
+                                            const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
+                                            html += \`<p><strong>📦 Environment:</strong> \${envName}</p>\`;
+                                            html += \`<p class="approval-info">⚠️ May require approval gates</p>\`;
+                                        }
+                                    }
+                                    
+                                    if (job.steps) {
+                                        html += '<ul class="steps">';
+                                        job.steps.forEach(step => {
+                                            const sid = \`step_\${stepCounter++}\`;
+                                            allSteps[sid] = step;
+                                            html += \`<li onclick="showStepDetails('\${sid}')">▶️ \${step.displayName || step.script?.substring(0, 50) || step.task || 'Step'}</li>\`;
+                                        });
+                                        html += '</ul>';
+                                    }
+                                    html += '</div>';
+                                }
+                            } catch (jobError) {
+                                console.error('Error rendering job:', jobError, job);
+                                html += \`<div class="job"><h3>\${job.displayName || job.job}</h3><p style="color: red;">Error rendering job</p></div>\`;
                             }
-                            html += '</div>';
                         });
                     }
                     html += '</div>';
@@ -496,6 +559,18 @@ export class PipelineVisualizerPanel {
                     html += \`<div id="J\${idx}" class="job-container" style="border-color: \${color}; background: linear-gradient(135deg, \${color}33 0%, \${color}14 100%);"><h2 style="color: \${color};">💼 \${job.name || key}</h2>\`;
                     html += '<div class="job">';
                     if (job['runs-on']) html += \`<p><strong>🖥️ Runs on:</strong> \${job['runs-on']}</p>\`;
+                    
+                    // Show environment info (which may require approvals)
+                    if (job.environment) {
+                        const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
+                        html += \`<div class="approval-badge">🔒 Protected Environment</div>\`;
+                        html += \`<p><strong>📦 Environment:</strong> \${envName}</p>\`;
+                        if (typeof job.environment === 'object' && job.environment.url) {
+                            html += \`<p><strong>🔗 URL:</strong> <code>\${job.environment.url}</code></p>\`;
+                        }
+                        html += \`<p class="approval-info">⚠️ This environment may require approval before deployment</p>\`;
+                    }
+                    
                     if (job.steps) {
                         html += '<h3>Steps</h3><ul class="steps">';
                         job.steps.forEach(step => {
