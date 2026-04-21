@@ -4,5 +4,6 @@ out
 .vscode-test
 .vscode-test/**
 examples/
+samples/
 .claude
 CLAUDE.MD

@@ -384,6 +384,9 @@ export class PipelineVisualizerPanel {
         const themePalette = ${JSON.stringify(palette)};
         const themeEdgeColor = '${edgeColor}';
         const themeHighlightColor = '${highlightColor}';
+        const themeAccent = '${accent}';
+        const themeCardBg = '${cardBgValue}';
+        const themeTextColor = '${textColorValue}';
 
         function refreshVisualization() {
             vscode.postMessage({ command: 'refresh' });
@@ -1048,6 +1051,8 @@ export class PipelineVisualizerPanel {
             }
         }
 
+        let bbSelectedPipeline = null;
+
         function renderBitbucket(data) {
             try {
                 if (!data || !data.pipelines) {
@@ -1056,7 +1061,6 @@ export class PipelineVisualizerPanel {
                 }
 
                 const pipelines = data.pipelines;
-                const defaultList = pipelines.default || [];
 
                 const countSteps = function(list) {
                     if (!Array.isArray(list)) { return 0; }
@@ -1073,26 +1077,67 @@ export class PipelineVisualizerPanel {
                     return n;
                 };
 
-                const otherTypes = Object.keys(pipelines).filter(function(k) { return k !== 'default'; });
+                // Build selector options from all pipeline types
+                const typeIcons = { 'branches': '🌿', 'pull-requests': '🔀', 'tags': '🏷️', 'custom': '⚙️' };
+                const typeDisplayNames = { 'branches': 'Branch', 'pull-requests': 'PR', 'tags': 'Tag', 'custom': 'Custom' };
+                const selectorOptions = [{ type: 'default', key: null, label: '🔵 Default' }];
+                Object.keys(pipelines).forEach(function(t) {
+                    if (t === 'default') { return; }
+                    const typeObj = pipelines[t];
+                    if (typeObj && typeof typeObj === 'object' && !Array.isArray(typeObj)) {
+                        const icon = typeIcons[t] || '📋';
+                        const displayName = typeDisplayNames[t] || t;
+                        Object.keys(typeObj).forEach(function(k) {
+                            selectorOptions.push({ type: t, key: k, label: icon + ' ' + displayName + ': ' + k });
+                        });
+                    }
+                });
 
-                let html = '<p><strong>Pipeline:</strong> Bitbucket Pipelines</p>';
-                html += '<div class="info-grid">';
+                // Initialize or validate selection
+                if (!bbSelectedPipeline) {
+                    bbSelectedPipeline = { type: 'default', key: null };
+                } else {
+                    const stillValid = selectorOptions.some(function(o) { return o.type === bbSelectedPipeline.type && o.key === bbSelectedPipeline.key; });
+                    if (!stillValid) { bbSelectedPipeline = { type: 'default', key: null }; }
+                }
+
+                // Resolve active list based on selection
+                let activeList;
+                if (bbSelectedPipeline.type === 'default') {
+                    activeList = pipelines.default || [];
+                } else {
+                    const typeObj = pipelines[bbSelectedPipeline.type];
+                    activeList = (typeObj && typeObj[bbSelectedPipeline.key]) || [];
+                }
+                const selectedValue = bbSelectedPipeline.type + '::' + bbSelectedPipeline.key;
+
+                // Info grid
+                let html = '<div class="info-grid">';
                 html += '<div class="info-card"><h3>📋 Pipeline Types</h3><p>' + Object.keys(pipelines).length + ' configured</p></div>';
-                html += '<div class="info-card"><h3>🔧 Default Steps</h3><p>' + countSteps(defaultList) + '</p></div>';
+                html += '<div class="info-card"><h3>🔧 Steps</h3><p>' + countSteps(activeList) + '</p></div>';
                 if (data.image) {
                     const imgName = typeof data.image === 'string' ? data.image : data.image.name;
                     html += '<div class="info-card"><h3>🐳 Default Image</h3><p>' + escapeHtml(imgName) + '</p></div>';
-                }
-                if (otherTypes.length > 0) {
-                    html += '<div class="info-card"><h3>🔀 Other Types</h3><p>' + otherTypes.join(', ') + '</p></div>';
                 }
                 if (data.definitions && data.definitions.caches) {
                     html += '<div class="info-card"><h3>💾 Caches</h3><p>' + Object.keys(data.definitions.caches).length + ' defined</p></div>';
                 }
                 html += '</div>';
 
+                // Pipeline selector dropdown
+                html += '<div style="margin: 16px 0;">';
+                html += '<label style="margin-right: 8px; font-weight: 600; font-size: 13px;">Pipeline:</label>';
+                html += '<select id="bb-pipeline-select" style="background: ' + themeCardBg + '; color: ' + themeTextColor + '; border: 1px solid ' + themeAccent + '; border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer;">';
+                selectorOptions.forEach(function(opt) {
+                    const val = opt.type + '::' + opt.key;
+                    html += '<option value="' + escapeHtml(val) + '"' + (val === selectedValue ? ' selected' : '') + '>' + escapeHtml(opt.label) + '</option>';
+                });
+                html += '</select>';
+                html += '</div>';
+
+                // Build diagram items from active list
                 const diagramItems = [];
-                defaultList.forEach(function(item, origIdx) {
+                activeList.forEach(function(item, origIdx) {
                     if (item.step) {
                         diagramItems.push({ origIdx: origIdx, label: (item.step.name || ('Step ' + (origIdx + 1))).replace(/"/g, "'") });
                     } else if (item.parallel) {
@@ -1182,7 +1227,7 @@ export class PipelineVisualizerPanel {
                 };
 
                 diagramItems.forEach(function(node, dIdx) {
-                    const item = defaultList[node.origIdx];
+                    const item = activeList[node.origIdx];
                     const color = nodeColors[dIdx % nodeColors.length];
 
                     if (item.step) {
@@ -1207,8 +1252,10 @@ export class PipelineVisualizerPanel {
                     }
                 });
 
+                // Summary cards for non-default pipeline types
                 const typeLabels = { 'branches': '🌿 Branches', 'pull-requests': '🔀 Pull Requests', 'tags': '🏷️ Tags', 'custom': '⚙️ Custom' };
-                otherTypes.forEach(function(type, typeIdx) {
+                Object.keys(pipelines).forEach(function(type, typeIdx) {
+                    if (type === 'default') { return; }
                     const typeObj = pipelines[type];
                     const label = typeLabels[type] || ('📋 ' + type);
                     const color = nodeColors[typeIdx % nodeColors.length];
@@ -1216,13 +1263,23 @@ export class PipelineVisualizerPanel {
                     html += '<h2 style="background: ' + color + '; color: white;">' + label + '</h2>';
                     if (typeObj && typeof typeObj === 'object' && !Array.isArray(typeObj)) {
                         Object.entries(typeObj).forEach(function(entry) {
-                            html += '<div class="job"><h3><code>' + escapeHtml(entry[0]) + '</code></h3><p>' + countSteps(entry[1]) + ' step(s)</p></div>';
+                            const isSelected = bbSelectedPipeline.type === type && bbSelectedPipeline.key === entry[0];
+                            const selectedTag = isSelected ? ' <span style="opacity: 0.7; font-size: 11px;">(viewing)</span>' : '';
+                            html += '<div class="job"><h3><code>' + escapeHtml(entry[0]) + '</code>' + selectedTag + '</h3><p>' + countSteps(entry[1]) + ' step(s)</p></div>';
                         });
                     }
                     html += '</div>';
                 });
 
                 document.getElementById('content').innerHTML = html;
+                const sel = document.getElementById('bb-pipeline-select');
+                if (sel) {
+                    sel.addEventListener('change', function() {
+                        const parts = this.value.split('::');
+                        bbSelectedPipeline = { type: parts[0], key: parts[1] === 'null' ? null : parts[1] };
+                        renderBitbucket(data);
+                    });
+                }
                 setTimeout(function() { mermaid.run(); }, 100);
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render Bitbucket Pipelines visualization.', '<strong>Tip:</strong> Please check your bitbucket-pipelines.yml file.');
