@@ -1,0 +1,11 @@
+.vscode/**
+.github/**
+.claude/**
+src/**
+node_modules/**
+.gitignore
+tsconfig.json
+package-lock.json
+icon.svg
+FUNDING.yml
+CONTRIBUTING.md
