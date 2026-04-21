@@ -2,6 +2,14 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.1.0] - 2026-04-21
+
+### Fixed
+- **Mermaid syntax error for pipeline/job names containing special characters**
+  - Job and stage names with `{`, `}`, `[`, `]` — such as GitHub Actions expression syntax like `${{ inputs.config_file }}` — now render correctly
+  - Node labels are now wrapped in double-quoted Mermaid syntax (`["label"]`), treating all special characters as literals
+  - Affects both GitHub Actions job names and Azure DevOps stage names
+
 ## [1.0.3] - 2026-01-14
 
 ### Added

@@ -112,6 +112,13 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.1.0
+
+Bug Fixes:
+- Fixed Mermaid syntax error ("Syntax error in text") when pipeline job or stage names contain special characters such as `{`, `}`, `[`, or `]`
+- GitHub Actions job names using expression syntax (e.g. `${{ inputs.config_file }}`) no longer break the diagram renderer
+- Applies to both GitHub Actions workflows and Azure DevOps pipelines
+
 ### 1.0.3
 
 Approval Gates Support:
@@ -152,7 +159,7 @@ The MIT License is one of the most permissive and popular open-source licenses. 
 - Built with modern VS Code Extension APIs
 - Powered by [Mermaid.js](https://mermaid.js.org/) for diagrams
 - YAML parsing by [js-yaml](https://github.com/nodeca/js-yaml)
-- **Created with AI assistance** using GitHub Copilot
+- **Created with AI assistance** 
 
 ---
 

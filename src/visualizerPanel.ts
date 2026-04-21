@@ -393,7 +393,8 @@ export class PipelineVisualizerPanel {
             if (data.stages) {
                 data.stages.forEach((stage, idx) => {
                     const id = \`S\${idx}\`;
-                    diagram += \` --> \${id}[\${stage.displayName || stage.stage || 'Stage'}]\`;
+                    const stageLabel = (stage.displayName || stage.stage || 'Stage').replace(/"/g, "'");
+                    diagram += \` --> \${id}["\${stageLabel}"]\`;
                 });
             }
             diagram += ' --> END([End])';
@@ -532,7 +533,8 @@ export class PipelineVisualizerPanel {
             if (data.jobs) {
                 Object.keys(data.jobs).forEach((key, idx) => {
                     const id = \`J\${idx}\`;
-                    diagram += \` --> \${id}[\${data.jobs[key].name || key}]\`;
+                    const jobLabel = (data.jobs[key].name || key).replace(/"/g, "'");
+                    diagram += \` --> \${id}["\${jobLabel}"]\`;
                 });
             }
             diagram += ' --> END([End])';
