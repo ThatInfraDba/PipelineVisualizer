@@ -137,7 +137,7 @@ export class PipelineVisualizerPanel {
 	private _documentUri: vscode.Uri | undefined;
 	private _disposables: vscode.Disposable[] = [];
 
-	public static createOrShow(extensionUri: vscode.Uri, yamlContent: string, pipelineData: any, layoutPreference: string, colorTheme: string) {
+	public static createOrShow(extensionUri: vscode.Uri, yamlContent: string, pipelineData: any, layoutPreference: string, colorTheme: string, fileName: string = '') {
 		const column = vscode.window.activeTextEditor
 			? vscode.window.activeTextEditor.viewColumn
 			: undefined;
@@ -146,7 +146,7 @@ export class PipelineVisualizerPanel {
 		if (PipelineVisualizerPanel.currentPanel) {
 			PipelineVisualizerPanel.currentPanel._panel.reveal(column);
 			PipelineVisualizerPanel.currentPanel._documentUri = documentUri;
-			PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme);
+			PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
 			return;
 		}
 
@@ -161,7 +161,7 @@ export class PipelineVisualizerPanel {
 			}
 		);
 
-		PipelineVisualizerPanel.currentPanel = new PipelineVisualizerPanel(panel, extensionUri);		PipelineVisualizerPanel.currentPanel._documentUri = documentUri;		PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme);
+		PipelineVisualizerPanel.currentPanel = new PipelineVisualizerPanel(panel, extensionUri);		PipelineVisualizerPanel.currentPanel._documentUri = documentUri;		PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
 	}
 
 	public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, state: any) {
@@ -210,9 +210,9 @@ export class PipelineVisualizerPanel {
 		);
 	}
 
-	private _update(yamlContent: string, pipelineData: any, layoutPreference: string, colorTheme: string) {
+	private _update(yamlContent: string, pipelineData: any, layoutPreference: string, colorTheme: string, fileName: string = '') {
 		const webview = this._panel.webview;
-		this._panel.webview.html = this._getHtmlForWebview(webview, yamlContent, pipelineData, layoutPreference, colorTheme);
+		this._panel.webview.html = this._getHtmlForWebview(webview, yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
 	}
 
 	public dispose() {
@@ -256,11 +256,13 @@ export class PipelineVisualizerPanel {
 		return rules.join('\n        ');
 	}
 
-	private _getHtmlForWebview(webview: vscode.Webview, yamlContent: string, pipelineData: any, layoutPreference: string, colorTheme: string): string {
-		const platform = this._detectPlatform(pipelineData);
+	private _getHtmlForWebview(webview: vscode.Webview, yamlContent: string, pipelineData: any, layoutPreference: string, colorTheme: string, fileName: string = ''): string {
+		const platform = this._detectPlatform(pipelineData, fileName);
 		const platformClass = platform === 'github' ? 'github-mode' : '';
 		const platformBadge = platform === 'github'
 			? '<span class="platform-badge github">🐙 GitHub Actions</span>'
+			: platform === 'gitlab'
+			? '<span class="platform-badge gitlab">🦊 GitLab CI</span>'
 			: '<span class="platform-badge azure">☁️ Azure DevOps</span>';
 
 		const escapedYaml = yamlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -270,9 +272,13 @@ export class PipelineVisualizerPanel {
 		const themeDef = THEMES[colorTheme] || THEMES['dark'];
 		let { mermaidTheme, mermaidThemeVariables, edgeColor, palette, primary, secondary, accent, bodyGradientStart, bodyGradientEnd } = themeDef;
 		if (themeDef.platformSpecific) {
-			primary = platform === 'github' ? '#2188ff' : '#667eea';
-			secondary = platform === 'github' ? '#6f42c1' : '#764ba2';
-			accent = platform === 'github' ? '#2188ff' : '#0078d4';
+			if (platform === 'github') {
+				primary = '#2188ff'; secondary = '#6f42c1'; accent = '#2188ff';
+			} else if (platform === 'gitlab') {
+				primary = '#FC6D26'; secondary = '#E24329'; accent = '#FC6D26';
+			} else {
+				primary = '#667eea'; secondary = '#764ba2'; accent = '#0078d4';
+			}
 			bodyGradientStart = primary;
 			bodyGradientEnd = secondary;
 		}
@@ -406,6 +412,8 @@ export class PipelineVisualizerPanel {
 
                     if (detectedPlatform === 'github') {
                         renderGitHub(pipelineData);
+                    } else if (detectedPlatform === 'gitlab') {
+                        renderGitLab(pipelineData);
                     } else {
                         renderAzure(pipelineData);
                     }
@@ -499,6 +507,8 @@ export class PipelineVisualizerPanel {
 
                 if (detectedPlatform === 'github') {
                     renderGitHub(pipelineData);
+                } else if (detectedPlatform === 'gitlab') {
+                    renderGitLab(pipelineData);
                 } else {
                     renderAzure(pipelineData);
                 }
@@ -736,17 +746,188 @@ export class PipelineVisualizerPanel {
                 showError('Rendering Error', error.message || 'Failed to render GitHub Actions visualization.', '<strong>Tip:</strong> There may be an issue with the workflow structure. Please check your YAML file.');
             }
         }
+
+        function renderGitLab(data) {
+            try {
+                if (!data) {
+                    showError('No Data', 'Pipeline data is empty or undefined.', '<strong>Tip:</strong> Make sure your YAML file contains valid GitLab CI configuration.');
+                    return;
+                }
+
+                const RESERVED = new Set(['stages', 'variables', 'default', 'include', 'workflow', 'spec', 'image', 'services', 'cache', 'before_script', 'after_script']);
+                const jobEntries = Object.entries(data).filter(([key, value]) =>
+                    !RESERVED.has(key) && !key.startsWith('.') && typeof value === 'object' && value !== null
+                );
+
+                const stageOrder = data.stages || ['build', 'test', 'deploy'];
+                const jobsByStage = {};
+                stageOrder.forEach(s => { jobsByStage[s] = []; });
+                jobEntries.forEach(([key, job]) => {
+                    const stage = job.stage || 'test';
+                    if (!jobsByStage[stage]) { jobsByStage[stage] = []; }
+                    jobsByStage[stage].push({ key, job });
+                });
+
+                const activeStages = stageOrder.filter(s => jobsByStage[s] && jobsByStage[s].length > 0);
+
+                let html = \`<p><strong>Pipeline:</strong> \${(data.workflow && data.workflow.name) || 'GitLab CI Pipeline'}</p>\`;
+                html += '<div class="info-grid">';
+                html += \`<div class="info-card"><h3>📊 Stages</h3><p>\${activeStages.length}</p></div>\`;
+                html += \`<div class="info-card"><h3>💼 Jobs</h3><p>\${jobEntries.length}</p></div>\`;
+                if (data.variables) html += \`<div class="info-card"><h3>🔧 Variables</h3><p>\${Object.keys(data.variables).length} defined</p></div>\`;
+                if (data.workflow) html += '<div class="info-card"><h3>🔀 Workflow</h3><p>Configured</p></div>';
+                if (data.default && data.default.image) {
+                    const imgName = typeof data.default.image === 'string' ? data.default.image : data.default.image.name;
+                    html += \`<div class="info-card"><h3>🐳 Default Image</h3><p>\${imgName}</p></div>\`;
+                }
+                html += '</div>';
+
+                let diagramDirection = 'LR';
+                if (layoutPreference === 'vertical') {
+                    diagramDirection = 'TD';
+                } else if (layoutPreference === 'horizontal') {
+                    diagramDirection = 'LR';
+                } else {
+                    diagramDirection = activeStages.length <= 6 ? 'LR' : 'TD';
+                }
+
+                const stageColors = themePalette;
+                let diagram = \`graph \${diagramDirection}\\nSTART([Start])\`;
+                activeStages.forEach((stage, idx) => {
+                    const id = \`GL\${idx}\`;
+                    const label = stage.replace(/"/g, "'");
+                    diagram += \` --> \${id}["\${label}"]\`;
+                });
+                diagram += ' --> END([End])';
+                activeStages.forEach((stage, idx) => {
+                    const id = \`GL\${idx}\`;
+                    const color = stageColors[idx % stageColors.length];
+                    diagram += \`\\nstyle \${id} fill:\${color},stroke:\${color},color:#fff\`;
+                    diagram += \`\\nclick \${id} scrollToGLStage_\${idx}\`;
+                    window[\`scrollToGLStage_\${idx}\`] = function() { scrollToStage(\`GL\${idx}\`); };
+                });
+                const glEdgeCount = activeStages.length + 1;
+                for (let i = 0; i < glEdgeCount; i++) {
+                    diagram += \`\\nlinkStyle \${i} stroke:\${themeEdgeColor},stroke-width:2px,fill:none\`;
+                }
+                html += \`<div class="mermaid-container"><div class="mermaid">\${diagram}</div></div>\`;
+
+                activeStages.forEach((stage, idx) => {
+                    const color = stageColors[idx % stageColors.length];
+                    html += \`<div id="GL\${idx}" class="stage" style="border-color: \${color}; background: linear-gradient(135deg, \${color}33 0%, \${color}14 100%);">\`;
+                    html += \`<h2 style="background: \${color}; color: white;">🦊 \${stage}</h2>\`;
+
+                    (jobsByStage[stage] || []).forEach(({ key, job }) => {
+                        const isManual = job.when === 'manual';
+                        const hasEnv = !!job.environment;
+
+                        if (isManual && !hasEnv) {
+                            html += '<div class="approval">';
+                            html += '<h4>⏸️ Manual Job</h4>';
+                            html += \`<p><strong>Job:</strong> \${key}</p>\`;
+                            if (job.rules) html += \`<p><strong>Rules:</strong> \${job.rules.length} condition(s)</p>\`;
+                            html += '</div>';
+                        } else {
+                            html += \`<div class="job"><h3>\${key}</h3>\`;
+
+                            if (hasEnv) {
+                                const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
+                                html += '<div class="approval-badge">🚀 Deployment Job</div>';
+                                html += \`<p><strong>📦 Environment:</strong> \${envName}</p>\`;
+                                if (isManual) { html += '<div class="approval-badge" style="background: linear-gradient(135deg, #888 0%, #666 100%);">⏸️ Manual Trigger</div>'; }
+                                html += '<p class="approval-info">⚠️ May require approval gates in GitLab</p>';
+                            }
+
+                            if (job.image) {
+                                const imgName = typeof job.image === 'string' ? job.image : job.image.name;
+                                html += \`<p><strong>🐳 Image:</strong> <code>\${imgName}</code></p>\`;
+                            }
+
+                            if (job.tags && job.tags.length > 0) {
+                                html += \`<p><strong>🏷️ Tags:</strong> \${job.tags.join(', ')}</p>\`;
+                            }
+
+                            if (job.needs !== undefined) {
+                                if (Array.isArray(job.needs) && job.needs.length === 0) {
+                                    html += '<p><strong>⚡ Needs:</strong> <em>none (starts immediately)</em></p>';
+                                } else if (Array.isArray(job.needs) && job.needs.length > 0) {
+                                    const needsNames = job.needs.map(n => typeof n === 'string' ? n : n.job).filter(Boolean).join(', ');
+                                    html += \`<p><strong>⚡ Needs:</strong> \${needsNames}</p>\`;
+                                }
+                            }
+
+                            if (job.rules && job.rules.length > 0) {
+                                html += \`<p><strong>📋 Rules:</strong> \${job.rules.length} condition(s)</p>\`;
+                            }
+
+                            if (job.allow_failure === true) {
+                                html += '<p class="approval-info">ℹ️ Allowed to fail</p>';
+                            }
+
+                            const steps = [];
+                            const resolvedBeforeScript = job.before_script || (data.default && data.default.before_script);
+                            if (resolvedBeforeScript) {
+                                (Array.isArray(resolvedBeforeScript) ? resolvedBeforeScript : [resolvedBeforeScript]).forEach(s => {
+                                    steps.push({ label: \`⚙️ \${String(s).substring(0, 60)}\`, script: String(s), phase: 'before_script' });
+                                });
+                            }
+                            const scripts = Array.isArray(job.script) ? job.script : (job.script ? [job.script] : []);
+                            scripts.forEach(s => {
+                                steps.push({ label: \`▶️ \${String(s).substring(0, 60)}\`, script: String(s), phase: 'script' });
+                            });
+                            if (job.after_script) {
+                                (Array.isArray(job.after_script) ? job.after_script : [job.after_script]).forEach(s => {
+                                    steps.push({ label: \`🔚 \${String(s).substring(0, 60)}\`, script: String(s), phase: 'after_script' });
+                                });
+                            }
+
+                            if (steps.length > 0) {
+                                html += '<ul class="steps">';
+                                steps.forEach(({ label, script, phase }) => {
+                                    const sid = \`step_\${stepCounter++}\`;
+                                    allSteps[sid] = { script, phase, displayName: label };
+                                    html += \`<li onclick="showStepDetails('\${sid}')">\${label}</li>\`;
+                                });
+                                html += '</ul>';
+                            }
+
+                            html += '</div>';
+                        }
+                    });
+
+                    html += '</div>';
+                });
+
+                document.getElementById('content').innerHTML = html;
+                setTimeout(() => mermaid.run(), 100);
+            } catch (error) {
+                showError('Rendering Error', error.message || 'Failed to render GitLab CI visualization.', '<strong>Tip:</strong> There may be an issue with the pipeline structure. Please check your .gitlab-ci.yml file.');
+            }
+        }
     </script>
 </body>
 </html>`;
 	}
 
-	private _detectPlatform(data: any): string {
-		if (data.on || data['runs-on'] || (data.jobs && Object.values(data.jobs).some((j: any) => j['runs-on'] || j.uses))) {
+	private _detectPlatform(data: any, fileName: string = ''): string {
+		// Filename is the strongest signal for GitLab
+		if (fileName.toLowerCase().includes('gitlab-ci')) { return 'gitlab'; }
+		// GitHub Actions: 'on' is the definitive marker
+		if (data.on || (data.jobs && !Array.isArray(data.jobs) && Object.values(data.jobs).some((j: any) => j['runs-on'] || j.uses))) {
 			return 'github';
 		}
-		if (data.stages || data.pool || (data.jobs && Array.isArray(data.jobs)) || data.trigger || data.pr) {
-			return 'azure';
+		// Azure-definitive markers
+		if (data.pool || (data.jobs && Array.isArray(data.jobs)) || data.trigger || data.pr) { return 'azure'; }
+		// GitLab: stages is an array of strings (Azure stages are objects with stage/jobs properties)
+		if (Array.isArray(data.stages) && data.stages.some((s: any) => typeof s === 'string')) { return 'gitlab'; }
+		// GitLab: workflow key is GitLab-specific
+		if (data.workflow) { return 'gitlab'; }
+		// Azure: stages as objects
+		if (data.stages) { return 'azure'; }
+		// GitLab fallback: flat top-level job structure with script key
+		const RESERVED = new Set(['stages', 'variables', 'default', 'include', 'workflow', 'spec']);
+		if (Object.keys(data).some(k => !RESERVED.has(k) && !k.startsWith('.') && typeof data[k] === 'object' && data[k] !== null && 'script' in data[k])) {
+			return 'gitlab';
 		}
 		return 'azure';
 	}
