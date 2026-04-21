@@ -11,6 +11,10 @@ interface ThemeDef {
     bodyGradientStart: string;
     bodyGradientEnd: string;
     platformSpecific: boolean;
+    containerBg?: string;   // overrides var(--vscode-editor-background)
+    cardBg?: string;        // overrides var(--vscode-textBlockQuote-background)
+    textColor?: string;     // overrides var(--vscode-foreground)
+    codeBg?: string;        // overrides var(--vscode-textCodeBlock-background)
 }
 
 const THEMES: Record<string, ThemeDef> = {
@@ -18,7 +22,7 @@ const THEMES: Record<string, ThemeDef> = {
         mermaidTheme: 'dark',
         mermaidThemeVariables: { lineColor: '#ffffff', primaryTextColor: '#ffffff', tertiaryColor: '#ffffff' },
         edgeColor: '#ffffff',
-        palette: ['#4A90E2', '#7ED321', '#F5A623', '#9013FE', '#50E3C2', '#FF6B6B'],
+        palette: ['#4E7FB5', '#5E9E3A', '#C4852A', '#6B3FA0', '#3A8A7A', '#B85555'],
         primary: '#667eea',
         secondary: '#764ba2',
         accent: '#667eea',
@@ -37,6 +41,10 @@ const THEMES: Record<string, ThemeDef> = {
         bodyGradientStart: '#c5cae9',
         bodyGradientEnd: '#bbdefb',
         platformSpecific: false,
+        containerBg: '#f5f6fa',
+        cardBg: '#e2e8f4',
+        textColor: '#1e2432',
+        codeBg: '#d8e0ee',
     },
     ocean: {
         mermaidTheme: 'base',
@@ -57,6 +65,10 @@ const THEMES: Record<string, ThemeDef> = {
         bodyGradientStart: '#0a1628',
         bodyGradientEnd: '#0d2137',
         platformSpecific: false,
+        containerBg: '#0f1f3a',
+        cardBg: '#0a1628',
+        textColor: '#E3F2FD',
+        codeBg: '#071020',
     },
     forest: {
         mermaidTheme: 'forest',
@@ -69,6 +81,10 @@ const THEMES: Record<string, ThemeDef> = {
         bodyGradientStart: '#0a1f0a',
         bodyGradientEnd: '#1a2e1a',
         platformSpecific: false,
+        containerBg: '#112211',
+        cardBg: '#0a1a0a',
+        textColor: '#E8F5E9',
+        codeBg: '#071007',
     },
     sunset: {
         mermaidTheme: 'base',
@@ -89,6 +105,10 @@ const THEMES: Record<string, ThemeDef> = {
         bodyGradientStart: '#1a0a00',
         bodyGradientEnd: '#2d1200',
         platformSpecific: false,
+        containerBg: '#281800',
+        cardBg: '#1a0e00',
+        textColor: '#FBE9E7',
+        codeBg: '#120800',
     },
     monochrome: {
         mermaidTheme: 'neutral',
@@ -101,6 +121,10 @@ const THEMES: Record<string, ThemeDef> = {
         bodyGradientStart: '#1a1a1a',
         bodyGradientEnd: '#2a2a2a',
         platformSpecific: false,
+        containerBg: '#1e1e1e',
+        cardBg: '#161616',
+        textColor: '#d4d4d4',
+        codeBg: '#111111',
     },
 };
 
@@ -253,6 +277,12 @@ export class PipelineVisualizerPanel {
 			bodyGradientEnd = secondary;
 		}
 
+		const containerBgValue = themeDef.containerBg || 'var(--vscode-editor-background)';
+		const cardBgValue = themeDef.cardBg || 'var(--vscode-textBlockQuote-background)';
+		const textColorValue = themeDef.textColor || 'var(--vscode-foreground)';
+		const codeBgValue = themeDef.codeBg || 'var(--vscode-textCodeBlock-background)';
+		const codeTextValue = themeDef.textColor || 'var(--vscode-editor-foreground)';
+
 		const stageCSS = this._generateStageCSS(palette);
 		const highlightColor = this._hexToRgba(palette[0], 0.6);
 
@@ -271,36 +301,36 @@ export class PipelineVisualizerPanel {
             --secondary-color: ${secondary};
             --accent-color: ${accent};
         }
-        body { font-family: var(--vscode-font-family); margin: 0; padding: 20px; background: linear-gradient(135deg, ${bodyGradientStart} 0%, ${bodyGradientEnd} 100%); min-height: 100vh; }
-        .container { max-width: 1400px; margin: 0 auto; background: var(--vscode-editor-background); border-radius: 12px; padding: 30px; }
-        h1 { color: var(--vscode-foreground); border-bottom: 3px solid var(--accent-color); padding-bottom: 15px; }
+        body { font-family: var(--vscode-font-family); margin: 0; padding: 20px; background: linear-gradient(135deg, ${bodyGradientStart} 0%, ${bodyGradientEnd} 100%); min-height: 100vh; color: ${textColorValue}; }
+        .container { max-width: 1400px; margin: 0 auto; background: ${containerBgValue}; border-radius: 12px; padding: 30px; }
+        h1 { color: ${textColorValue}; border-bottom: 3px solid var(--accent-color); padding-bottom: 15px; }
         .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .refresh-btn { background: var(--accent-color); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; transition: opacity 0.2s; }
         .refresh-btn:hover { opacity: 0.8; }
         .refresh-btn:active { opacity: 0.6; }
         .platform-badge { display: inline-block; padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; margin-left: 15px; background: var(--accent-color); color: white; }
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 30px 0; }
-        .info-card { background: var(--vscode-textBlockQuote-background); padding: 20px; border-radius: 8px; border-left: 4px solid var(--accent-color); }
+        .info-card { background: ${cardBgValue}; padding: 20px; border-radius: 8px; border-left: 4px solid var(--accent-color); }
         .info-card h3 { margin-top: 0; color: var(--accent-color); font-size: 14px; }
-        .mermaid-container { background: var(--vscode-textBlockQuote-background); padding: 30px; border-radius: 8px; margin: 30px 0; overflow-x: auto; }
+        .mermaid-container { background: ${cardBgValue}; padding: 30px; border-radius: 8px; margin: 30px 0; overflow-x: auto; }
         .stage, .job-container { margin: 30px 0; padding: 25px; border-radius: 8px; border: 3px solid var(--vscode-panel-border); transition: box-shadow 0.3s ease; scroll-margin-top: 20px; }
         ${stageCSS}
         .stage h2 { margin-top: 0; font-size: 22px; font-weight: 600; padding: 10px; border-radius: 6px; color: white; }
         .job-container { border-color: ${palette[0]}; background: linear-gradient(135deg, ${this._hexToRgba(palette[0], 0.12)} 0%, ${this._hexToRgba(palette[0], 0.05)} 100%); }
         .job-container h2 { margin-top: 0; font-size: 20px; font-weight: 600; }
-        .job { background: var(--vscode-editor-background); padding: 15px; margin: 15px 0; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .job { background: ${containerBgValue}; padding: 15px; margin: 15px 0; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
         .steps { list-style: none; padding-left: 0; }
         .steps li { padding: 10px 15px; margin: 10px 0; background: linear-gradient(135deg, ${this._hexToRgba(accent, 0.12)} 0%, ${this._hexToRgba(accent, 0.05)} 100%); border-left: 4px solid ${accent}; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .steps li:hover { transform: translateX(5px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); background: linear-gradient(135deg, ${this._hexToRgba(accent, 0.2)} 0%, ${this._hexToRgba(accent, 0.1)} 100%); }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.7); }
-        .modal-content { background: var(--vscode-editor-background); margin: 5% auto; padding: 0; border-radius: 12px; width: 80%; max-width: 900px; max-height: 80vh; overflow: hidden; }
+        .modal-content { background: ${containerBgValue}; margin: 5% auto; padding: 0; border-radius: 12px; width: 80%; max-width: 900px; max-height: 80vh; overflow: hidden; }
         .modal-header { padding: 20px 30px; background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%); color: white; }
         .modal-body { padding: 30px; max-height: calc(80vh - 100px); overflow-y: auto; }
         .close { color: white; float: right; font-size: 28px; cursor: pointer; }
-        .code-block { background: var(--vscode-textCodeBlock-background); color: var(--vscode-editor-foreground); padding: 15px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; font-family: var(--vscode-editor-font-family); font-size: 13px; max-height: 400px; overflow-y: auto; }
+        .code-block { background: ${codeBgValue}; color: ${codeTextValue}; padding: 15px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; font-family: var(--vscode-editor-font-family); font-size: 13px; max-height: 400px; overflow-y: auto; }
         .modal-body dl { display: grid; grid-template-columns: auto 1fr; gap: 15px 20px; }
         .modal-body dt { font-weight: bold; color: var(--accent-color); }
-        .modal-body dd { margin: 0; padding: 8px; background: var(--vscode-textBlockQuote-background); border-radius: 4px; }
+        .modal-body dd { margin: 0; padding: 8px; background: ${cardBgValue}; border-radius: 4px; }
         .badge { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 12px; margin-left: 10px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
         .approval { background: #fff3cd; border: 2px solid #ffc107; padding: 15px; margin: 15px 0; border-radius: 6px; }
         .approval h4 { margin-top: 0; color: #856404; font-size: 16px; font-weight: 600; }

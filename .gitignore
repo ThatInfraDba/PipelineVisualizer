@@ -5,3 +5,4 @@ out
 .vscode-test/**
 examples/
 .claude
+CLAUDE.MD
