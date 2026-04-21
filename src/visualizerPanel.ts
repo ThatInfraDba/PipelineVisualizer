@@ -263,6 +263,8 @@ export class PipelineVisualizerPanel {
 			? '<span class="platform-badge github">🐙 GitHub Actions</span>'
 			: platform === 'gitlab'
 			? '<span class="platform-badge gitlab">🦊 GitLab CI</span>'
+			: platform === 'aws-codebuild'
+			? '<span class="platform-badge aws">🏗️ AWS CodeBuild</span>'
 			: '<span class="platform-badge azure">☁️ Azure DevOps</span>';
 
 		const escapedYaml = yamlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -276,6 +278,8 @@ export class PipelineVisualizerPanel {
 				primary = '#2188ff'; secondary = '#6f42c1'; accent = '#2188ff';
 			} else if (platform === 'gitlab') {
 				primary = '#FC6D26'; secondary = '#E24329'; accent = '#FC6D26';
+			} else if (platform === 'aws-codebuild') {
+				primary = '#FF9900'; secondary = '#C7511F'; accent = '#FF9900';
 			} else {
 				primary = '#667eea'; secondary = '#764ba2'; accent = '#0078d4';
 			}
@@ -414,6 +418,8 @@ export class PipelineVisualizerPanel {
                         renderGitHub(pipelineData);
                     } else if (detectedPlatform === 'gitlab') {
                         renderGitLab(pipelineData);
+                    } else if (detectedPlatform === 'aws-codebuild') {
+                        renderAWSCodeBuild(pipelineData);
                     } else {
                         renderAzure(pipelineData);
                     }
@@ -509,6 +515,8 @@ export class PipelineVisualizerPanel {
                     renderGitHub(pipelineData);
                 } else if (detectedPlatform === 'gitlab') {
                     renderGitLab(pipelineData);
+                } else if (detectedPlatform === 'aws-codebuild') {
+                    renderAWSCodeBuild(pipelineData);
                 } else {
                     renderAzure(pipelineData);
                 }
@@ -904,17 +912,150 @@ export class PipelineVisualizerPanel {
                 showError('Rendering Error', error.message || 'Failed to render GitLab CI visualization.', '<strong>Tip:</strong> There may be an issue with the pipeline structure. Please check your .gitlab-ci.yml file.');
             }
         }
+
+        function renderAWSCodeBuild(data) {
+            try {
+                if (!data) {
+                    showError('No Data', 'Buildspec data is empty or undefined.', '<strong>Tip:</strong> Make sure your file contains valid AWS CodeBuild buildspec configuration.');
+                    return;
+                }
+
+                const PHASE_ORDER = ['install', 'pre_build', 'build', 'post_build'];
+                const presentPhases = PHASE_ORDER.filter(p => data.phases && data.phases[p]);
+
+                let html = \`<p><strong>Buildspec version:</strong> \${data.version || 'Not specified'}</p>\`;
+                html += '<div class="info-grid">';
+                html += \`<div class="info-card"><h3>🔧 Phases</h3><p>\${presentPhases.length} defined</p></div>\`;
+
+                if (data.artifacts) {
+                    const artifactFiles = Array.isArray(data.artifacts.files) ? data.artifacts.files.length : (data.artifacts.files ? 1 : 0);
+                    html += \`<div class="info-card"><h3>📦 Artifacts</h3><p>\${artifactFiles} file pattern(s)</p></div>\`;
+                }
+
+                if (data.env) {
+                    const varCount = (data.env.variables ? Object.keys(data.env.variables).length : 0)
+                        + (data.env['exported-variables'] ? data.env['exported-variables'].length : 0);
+                    html += \`<div class="info-card"><h3>🔒 Env Variables</h3><p>\${varCount} defined</p></div>\`;
+                    if (data.env['secrets-manager'] || data.env['parameter-store']) {
+                        html += '<div class="info-card"><h3>🔑 Secrets</h3><p>SSM / Secrets Manager referenced</p></div>';
+                    }
+                }
+
+                if (data.cache && data.cache.paths) {
+                    html += \`<div class="info-card"><h3>💾 Cache</h3><p>\${data.cache.paths.length} path(s)</p></div>\`;
+                }
+
+                if (data.reports) {
+                    html += \`<div class="info-card"><h3>📊 Reports</h3><p>\${Object.keys(data.reports).length} report group(s)</p></div>\`;
+                }
+
+                html += '</div>';
+
+                let diagramDirection = 'LR';
+                if (layoutPreference === 'vertical') {
+                    diagramDirection = 'TD';
+                } else if (layoutPreference === 'horizontal') {
+                    diagramDirection = 'LR';
+                } else {
+                    diagramDirection = presentPhases.length <= 6 ? 'LR' : 'TD';
+                }
+
+                const phaseColors = themePalette;
+                let diagram = \`graph \${diagramDirection}\\nSTART([Start])\`;
+                presentPhases.forEach((phase, idx) => {
+                    const id = \`CB\${idx}\`;
+                    const label = phase.replace(/_/g, ' ');
+                    diagram += \` --> \${id}["\${label}"]\`;
+                });
+                diagram += ' --> END([End])';
+                presentPhases.forEach((phase, idx) => {
+                    const id = \`CB\${idx}\`;
+                    const color = phaseColors[idx % phaseColors.length];
+                    diagram += \`\\nstyle \${id} fill:\${color},stroke:\${color},color:#fff\`;
+                    diagram += \`\\nclick \${id} scrollToCBPhase_\${idx}\`;
+                    window[\`scrollToCBPhase_\${idx}\`] = function() { scrollToStage(\`CB\${idx}\`); };
+                });
+                const cbEdgeCount = presentPhases.length + 1;
+                for (let i = 0; i < cbEdgeCount; i++) {
+                    diagram += \`\\nlinkStyle \${i} stroke:\${themeEdgeColor},stroke-width:2px,fill:none\`;
+                }
+                html += \`<div class="mermaid-container"><div class="mermaid">\${diagram}</div></div>\`;
+
+                presentPhases.forEach((phase, idx) => {
+                    const phaseData = data.phases[phase];
+                    const color = phaseColors[idx % phaseColors.length];
+                    const phaseLabel = phase.replace(/_/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase());
+
+                    html += \`<div id="CB\${idx}" class="stage" style="border-color: \${color}; background: linear-gradient(135deg, \${color}33 0%, \${color}14 100%);">\`;
+                    html += \`<h2 style="background: \${color}; color: white;">🏗️ \${phaseLabel}</h2>\`;
+
+                    if (phaseData['runtime-versions']) {
+                        const runtimes = Object.entries(phaseData['runtime-versions']).map(([k, v]) => \`\${k}: \${v}\`).join(', ');
+                        html += \`<p><strong>⚙️ Runtimes:</strong> <code>\${runtimes}</code></p>\`;
+                    }
+
+                    const renderCommands = (cmds, icon, label) => {
+                        if (!cmds || !cmds.length) { return ''; }
+                        let out = \`<h3>\${icon} \${label}</h3><ul class="steps">\`;
+                        (Array.isArray(cmds) ? cmds : [cmds]).forEach(cmd => {
+                            const sid = \`step_\${stepCounter++}\`;
+                            allSteps[sid] = { script: String(cmd), displayName: String(cmd).substring(0, 80), phase };
+                            out += \`<li onclick="showStepDetails('\${sid}')">▶️ \${escapeHtml(String(cmd).substring(0, 80))}\${String(cmd).length > 80 ? '…' : ''}</li>\`;
+                        });
+                        out += '</ul>';
+                        return out;
+                    };
+
+                    html += renderCommands(phaseData.commands, '▶️', 'Commands');
+
+                    if (phaseData.finally) {
+                        html += renderCommands(phaseData.finally, '🔚', 'Finally');
+                    }
+
+                    html += '</div>';
+                });
+
+                if (data.artifacts) {
+                    html += \`<div class="stage" style="border-color: \${phaseColors[4 % phaseColors.length]}; background: linear-gradient(135deg, \${phaseColors[4 % phaseColors.length]}33 0%, \${phaseColors[4 % phaseColors.length]}14 100%);">\`;
+                    html += \`<h2 style="background: \${phaseColors[4 % phaseColors.length]}; color: white;">📦 Artifacts</h2>\`;
+                    if (data.artifacts.files) {
+                        const files = Array.isArray(data.artifacts.files) ? data.artifacts.files : [data.artifacts.files];
+                        html += \`<p><strong>Files:</strong></p><ul class="steps">\`;
+                        files.forEach(f => { html += \`<li style="cursor:default;">📄 \${escapeHtml(String(f))}</li>\`; });
+                        html += '</ul>';
+                    }
+                    if (data.artifacts['base-directory']) {
+                        html += \`<p><strong>Base directory:</strong> <code>\${escapeHtml(String(data.artifacts['base-directory']))}</code></p>\`;
+                    }
+                    if (data.artifacts.name) {
+                        html += \`<p><strong>Artifact name:</strong> <code>\${escapeHtml(String(data.artifacts.name))}</code></p>\`;
+                    }
+                    html += '</div>';
+                }
+
+                document.getElementById('content').innerHTML = html;
+                setTimeout(() => mermaid.run(), 100);
+            } catch (error) {
+                showError('Rendering Error', error.message || 'Failed to render AWS CodeBuild visualization.', '<strong>Tip:</strong> There may be an issue with the buildspec structure. Please check your buildspec.yml file.');
+            }
+        }
     </script>
 </body>
 </html>`;
 	}
 
 	private _detectPlatform(data: any, fileName: string = ''): string {
-		// Filename is the strongest signal for GitLab
+		// Filename-based signals (strongest)
 		if (fileName.toLowerCase().includes('gitlab-ci')) { return 'gitlab'; }
+		if (fileName.toLowerCase().includes('buildspec')) { return 'aws-codebuild'; }
 		// GitHub Actions: 'on' is the definitive marker
 		if (data.on || (data.jobs && !Array.isArray(data.jobs) && Object.values(data.jobs).some((j: any) => j['runs-on'] || j.uses))) {
 			return 'github';
+		}
+		// AWS CodeBuild: version 0.2 + phases with canonical CodeBuild phase keys
+		const CB_PHASES = new Set(['install', 'pre_build', 'build', 'post_build']);
+		if (data.phases && typeof data.phases === 'object' && Object.keys(data.phases).some(k => CB_PHASES.has(k))) {
+			return 'aws-codebuild';
 		}
 		// Azure-definitive markers
 		if (data.pool || (data.jobs && Array.isArray(data.jobs)) || data.trigger || data.pr) { return 'azure'; }
