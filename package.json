@@ -69,6 +69,20 @@
             "Always use vertical layout (top-to-bottom)"
           ],
           "description": "Controls the orientation of the Mermaid diagram in pipeline visualizations"
+        },
+        "pipelineVisualizer.colorTheme": {
+          "type": "string",
+          "default": "dark",
+          "enum": ["dark", "light", "ocean", "forest", "sunset", "monochrome"],
+          "enumDescriptions": [
+            "Dark background with vibrant multi-color stage palette (default)",
+            "Light background with deep, saturated colors — best with light VS Code themes",
+            "Deep navy background with a blue spectrum palette",
+            "Dark green background with an earthy green palette",
+            "Dark amber background with a warm orange and red palette",
+            "Near-black background with a blue-grey palette"
+          ],
+          "description": "Controls the color theme of the pipeline visualization panel"
         }
       }
     }

@@ -35,12 +35,13 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			// Get user preference for diagram layout
+			// Get user preferences
 			const config = vscode.workspace.getConfiguration('pipelineVisualizer');
 			const layoutPreference = config.get<string>('diagramLayout', 'automatic');
+			const colorTheme = config.get<string>('colorTheme', 'dark');
 
 			// Create and show the visualizer panel
-			PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, pipelineData, layoutPreference);
+			PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, pipelineData, layoutPreference, colorTheme);
 			
 		} catch (error) {
 			vscode.window.showErrorMessage(`Error parsing YAML: ${error}`);
