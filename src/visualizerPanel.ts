@@ -265,6 +265,8 @@ export class PipelineVisualizerPanel {
 			? '<span class="platform-badge gitlab">🦊 GitLab CI</span>'
 			: platform === 'aws-codebuild'
 			? '<span class="platform-badge aws">🏗️ AWS CodeBuild</span>'
+			: platform === 'bitbucket'
+			? '<span class="platform-badge bitbucket">🪣 Bitbucket Pipelines</span>'
 			: '<span class="platform-badge azure">☁️ Azure DevOps</span>';
 
 		const escapedYaml = yamlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -280,6 +282,8 @@ export class PipelineVisualizerPanel {
 				primary = '#FC6D26'; secondary = '#E24329'; accent = '#FC6D26';
 			} else if (platform === 'aws-codebuild') {
 				primary = '#FF9900'; secondary = '#C7511F'; accent = '#FF9900';
+			} else if (platform === 'bitbucket') {
+				primary = '#0052CC'; secondary = '#0747A6'; accent = '#0052CC';
 			} else {
 				primary = '#667eea'; secondary = '#764ba2'; accent = '#0078d4';
 			}
@@ -380,6 +384,9 @@ export class PipelineVisualizerPanel {
         const themePalette = ${JSON.stringify(palette)};
         const themeEdgeColor = '${edgeColor}';
         const themeHighlightColor = '${highlightColor}';
+        const themeAccent = '${accent}';
+        const themeCardBg = '${cardBgValue}';
+        const themeTextColor = '${textColorValue}';
 
         function refreshVisualization() {
             vscode.postMessage({ command: 'refresh' });
@@ -420,6 +427,8 @@ export class PipelineVisualizerPanel {
                         renderGitLab(pipelineData);
                     } else if (detectedPlatform === 'aws-codebuild') {
                         renderAWSCodeBuild(pipelineData);
+                    } else if (detectedPlatform === 'bitbucket') {
+                        renderBitbucket(pipelineData);
                     } else {
                         renderAzure(pipelineData);
                     }
@@ -517,6 +526,8 @@ export class PipelineVisualizerPanel {
                     renderGitLab(pipelineData);
                 } else if (detectedPlatform === 'aws-codebuild') {
                     renderAWSCodeBuild(pipelineData);
+                } else if (detectedPlatform === 'bitbucket') {
+                    renderBitbucket(pipelineData);
                 } else {
                     renderAzure(pipelineData);
                 }
@@ -1039,6 +1050,241 @@ export class PipelineVisualizerPanel {
                 showError('Rendering Error', error.message || 'Failed to render AWS CodeBuild visualization.', '<strong>Tip:</strong> There may be an issue with the buildspec structure. Please check your buildspec.yml file.');
             }
         }
+
+        let bbSelectedPipeline = null;
+
+        function renderBitbucket(data) {
+            try {
+                if (!data || !data.pipelines) {
+                    showError('No Data', 'Pipeline data is empty or undefined.', '<strong>Tip:</strong> Make sure your file is a valid bitbucket-pipelines.yml configuration.');
+                    return;
+                }
+
+                const pipelines = data.pipelines;
+
+                const countSteps = function(list) {
+                    if (!Array.isArray(list)) { return 0; }
+                    let n = 0;
+                    list.forEach(function(item) {
+                        if (item.step) { n++; }
+                        else if (item.parallel) {
+                            const ps = Array.isArray(item.parallel) ? item.parallel : (item.parallel.steps || []);
+                            ps.forEach(function(p) { if (p.step) { n++; } });
+                        } else if (item.stage) {
+                            (item.stage.steps || []).forEach(function(s) { if (s.step) { n++; } });
+                        }
+                    });
+                    return n;
+                };
+
+                // Build selector options from all pipeline types
+                const typeIcons = { 'branches': '🌿', 'pull-requests': '🔀', 'tags': '🏷️', 'custom': '⚙️' };
+                const typeDisplayNames = { 'branches': 'Branch', 'pull-requests': 'PR', 'tags': 'Tag', 'custom': 'Custom' };
+                const selectorOptions = [{ type: 'default', key: null, label: '🔵 Default' }];
+                Object.keys(pipelines).forEach(function(t) {
+                    if (t === 'default') { return; }
+                    const typeObj = pipelines[t];
+                    if (typeObj && typeof typeObj === 'object' && !Array.isArray(typeObj)) {
+                        const icon = typeIcons[t] || '📋';
+                        const displayName = typeDisplayNames[t] || t;
+                        Object.keys(typeObj).forEach(function(k) {
+                            selectorOptions.push({ type: t, key: k, label: icon + ' ' + displayName + ': ' + k });
+                        });
+                    }
+                });
+
+                // Initialize or validate selection
+                if (!bbSelectedPipeline) {
+                    bbSelectedPipeline = { type: 'default', key: null };
+                } else {
+                    const stillValid = selectorOptions.some(function(o) { return o.type === bbSelectedPipeline.type && o.key === bbSelectedPipeline.key; });
+                    if (!stillValid) { bbSelectedPipeline = { type: 'default', key: null }; }
+                }
+
+                // Resolve active list based on selection
+                let activeList;
+                if (bbSelectedPipeline.type === 'default') {
+                    activeList = pipelines.default || [];
+                } else {
+                    const typeObj = pipelines[bbSelectedPipeline.type];
+                    activeList = (typeObj && typeObj[bbSelectedPipeline.key]) || [];
+                }
+                const selectedValue = bbSelectedPipeline.type + '::' + bbSelectedPipeline.key;
+
+                // Info grid
+                let html = '<div class="info-grid">';
+                html += '<div class="info-card"><h3>📋 Pipeline Types</h3><p>' + Object.keys(pipelines).length + ' configured</p></div>';
+                html += '<div class="info-card"><h3>🔧 Steps</h3><p>' + countSteps(activeList) + '</p></div>';
+                if (data.image) {
+                    const imgName = typeof data.image === 'string' ? data.image : data.image.name;
+                    html += '<div class="info-card"><h3>🐳 Default Image</h3><p>' + escapeHtml(imgName) + '</p></div>';
+                }
+                if (data.definitions && data.definitions.caches) {
+                    html += '<div class="info-card"><h3>💾 Caches</h3><p>' + Object.keys(data.definitions.caches).length + ' defined</p></div>';
+                }
+                html += '</div>';
+
+                // Pipeline selector dropdown
+                html += '<div style="margin: 16px 0;">';
+                html += '<label style="margin-right: 8px; font-weight: 600; font-size: 13px;">Pipeline:</label>';
+                html += '<select id="bb-pipeline-select" style="background: ' + themeCardBg + '; color: ' + themeTextColor + '; border: 1px solid ' + themeAccent + '; border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer;">';
+                selectorOptions.forEach(function(opt) {
+                    const val = opt.type + '::' + opt.key;
+                    html += '<option value="' + escapeHtml(val) + '"' + (val === selectedValue ? ' selected' : '') + '>' + escapeHtml(opt.label) + '</option>';
+                });
+                html += '</select>';
+                html += '</div>';
+
+                // Build diagram items from active list
+                const diagramItems = [];
+                activeList.forEach(function(item, origIdx) {
+                    if (item.step) {
+                        diagramItems.push({ origIdx: origIdx, label: (item.step.name || ('Step ' + (origIdx + 1))).replace(/"/g, "'") });
+                    } else if (item.parallel) {
+                        const ps = Array.isArray(item.parallel) ? item.parallel : (item.parallel.steps || []);
+                        const n = ps.filter(function(p) { return p.step; }).length;
+                        diagramItems.push({ origIdx: origIdx, label: '⚡ ' + n + ' parallel steps' });
+                    } else if (item.stage) {
+                        const stageName = (item.stage.name || ('Stage ' + (origIdx + 1))).replace(/"/g, "'");
+                        const n = (item.stage.steps || []).filter(function(s) { return s.step; }).length;
+                        diagramItems.push({ origIdx: origIdx, label: '📋 ' + stageName + ' (' + n + ' steps)' });
+                    }
+                });
+
+                let diagramDirection = 'LR';
+                if (layoutPreference === 'vertical') {
+                    diagramDirection = 'TD';
+                } else if (layoutPreference === 'horizontal') {
+                    diagramDirection = 'LR';
+                } else {
+                    diagramDirection = diagramItems.length <= 6 ? 'LR' : 'TD';
+                }
+
+                const nodeColors = themePalette;
+                let diagram = 'graph ' + diagramDirection + '\\nSTART([Start])';
+                diagramItems.forEach(function(node) {
+                    diagram += ' --> BB' + node.origIdx + '["' + node.label + '"]';
+                });
+                diagram += ' --> END([End])';
+                diagramItems.forEach(function(node, dIdx) {
+                    const color = nodeColors[dIdx % nodeColors.length];
+                    diagram += '\\nstyle BB' + node.origIdx + ' fill:' + color + ',stroke:' + color + ',color:#fff';
+                    diagram += '\\nclick BB' + node.origIdx + ' scrollToBBNode_' + node.origIdx;
+                    window['scrollToBBNode_' + node.origIdx] = (function(id) { return function() { scrollToStage(id); }; })('BB' + node.origIdx);
+                });
+                const bbEdgeCount = diagramItems.length + 1;
+                for (let i = 0; i < bbEdgeCount; i++) {
+                    diagram += '\\nlinkStyle ' + i + ' stroke:' + themeEdgeColor + ',stroke-width:2px,fill:none';
+                }
+                html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
+
+                const renderStep = function(step) {
+                    let out = '<div class="job"><h3>' + escapeHtml(step.name || 'Unnamed Step') + '</h3>';
+                    if (step.deployment) {
+                        out += '<div class="approval-badge">🚀 Deployment: ' + escapeHtml(String(step.deployment)) + '</div>';
+                        out += '<p class="approval-info">⚠️ May require approval gates in Bitbucket</p>';
+                    }
+                    if (step.trigger === 'manual') {
+                        out += '<div class="approval-badge" style="background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%);">⏸️ Manual Trigger</div>';
+                    }
+                    if (step.image) {
+                        const imgName = typeof step.image === 'string' ? step.image : step.image.name;
+                        out += '<p><strong>🐳 Image:</strong> <code>' + escapeHtml(imgName) + '</code></p>';
+                    }
+                    if (step.size) {
+                        out += '<p><strong>📐 Size:</strong> ' + escapeHtml(String(step.size)) + '</p>';
+                    }
+                    if (step.caches && step.caches.length) {
+                        out += '<p><strong>💾 Caches:</strong> ' + step.caches.join(', ') + '</p>';
+                    }
+                    if (step.services && step.services.length) {
+                        out += '<p><strong>🛠️ Services:</strong> ' + step.services.join(', ') + '</p>';
+                    }
+                    if (step.artifacts && step.artifacts.paths) {
+                        out += '<p><strong>📦 Artifacts:</strong> ' + step.artifacts.paths.join(', ') + '</p>';
+                    }
+                    const cmds = Array.isArray(step.script) ? step.script : (step.script ? [step.script] : []);
+                    if (cmds.length) {
+                        out += '<ul class="steps">';
+                        cmds.forEach(function(cmd) {
+                            const sid = 'step_' + stepCounter++;
+                            allSteps[sid] = { script: String(cmd), displayName: String(cmd).substring(0, 80) };
+                            out += '<li onclick="showStepDetails(\\'' + sid + '\\')">▶️ ' + escapeHtml(String(cmd).substring(0, 80)) + (String(cmd).length > 80 ? '…' : '') + '</li>';
+                        });
+                        out += '</ul>';
+                    }
+                    if (step['after-script'] && step['after-script'].length) {
+                        out += '<ul class="steps">';
+                        step['after-script'].forEach(function(cmd) {
+                            const sid = 'step_' + stepCounter++;
+                            allSteps[sid] = { script: String(cmd), displayName: String(cmd).substring(0, 80) };
+                            out += '<li onclick="showStepDetails(\\'' + sid + '\\')">🔚 ' + escapeHtml(String(cmd).substring(0, 80)) + (String(cmd).length > 80 ? '…' : '') + '</li>';
+                        });
+                        out += '</ul>';
+                    }
+                    out += '</div>';
+                    return out;
+                };
+
+                diagramItems.forEach(function(node, dIdx) {
+                    const item = activeList[node.origIdx];
+                    const color = nodeColors[dIdx % nodeColors.length];
+
+                    if (item.step) {
+                        html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
+                        html += '<h2 style="background: ' + color + '; color: white;">🪣 ' + escapeHtml(item.step.name || ('Step ' + (node.origIdx + 1))) + '</h2>';
+                        html += renderStep(item.step);
+                        html += '</div>';
+                    } else if (item.parallel) {
+                        const ps = Array.isArray(item.parallel) ? item.parallel : (item.parallel.steps || []);
+                        const pSteps = ps.filter(function(p) { return p.step; }).map(function(p) { return p.step; });
+                        html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
+                        html += '<h2 style="background: ' + color + '; color: white;">⚡ Parallel Steps (' + pSteps.length + ')</h2>';
+                        pSteps.forEach(function(step) { html += renderStep(step); });
+                        html += '</div>';
+                    } else if (item.stage) {
+                        const stageSteps = (item.stage.steps || []).filter(function(s) { return s.step; }).map(function(s) { return s.step; });
+                        const stageName = item.stage.name || ('Stage ' + (node.origIdx + 1));
+                        html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
+                        html += '<h2 style="background: ' + color + '; color: white;">📋 ' + escapeHtml(stageName) + '</h2>';
+                        stageSteps.forEach(function(step) { html += renderStep(step); });
+                        html += '</div>';
+                    }
+                });
+
+                // Summary cards for non-default pipeline types
+                const typeLabels = { 'branches': '🌿 Branches', 'pull-requests': '🔀 Pull Requests', 'tags': '🏷️ Tags', 'custom': '⚙️ Custom' };
+                Object.keys(pipelines).forEach(function(type, typeIdx) {
+                    if (type === 'default') { return; }
+                    const typeObj = pipelines[type];
+                    const label = typeLabels[type] || ('📋 ' + type);
+                    const color = nodeColors[typeIdx % nodeColors.length];
+                    html += '<div class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
+                    html += '<h2 style="background: ' + color + '; color: white;">' + label + '</h2>';
+                    if (typeObj && typeof typeObj === 'object' && !Array.isArray(typeObj)) {
+                        Object.entries(typeObj).forEach(function(entry) {
+                            const isSelected = bbSelectedPipeline.type === type && bbSelectedPipeline.key === entry[0];
+                            const selectedTag = isSelected ? ' <span style="opacity: 0.7; font-size: 11px;">(viewing)</span>' : '';
+                            html += '<div class="job"><h3><code>' + escapeHtml(entry[0]) + '</code>' + selectedTag + '</h3><p>' + countSteps(entry[1]) + ' step(s)</p></div>';
+                        });
+                    }
+                    html += '</div>';
+                });
+
+                document.getElementById('content').innerHTML = html;
+                const sel = document.getElementById('bb-pipeline-select');
+                if (sel) {
+                    sel.addEventListener('change', function() {
+                        const parts = this.value.split('::');
+                        bbSelectedPipeline = { type: parts[0], key: parts[1] === 'null' ? null : parts[1] };
+                        renderBitbucket(data);
+                    });
+                }
+                setTimeout(function() { mermaid.run(); }, 100);
+            } catch (error) {
+                showError('Rendering Error', error.message || 'Failed to render Bitbucket Pipelines visualization.', '<strong>Tip:</strong> Please check your bitbucket-pipelines.yml file.');
+            }
+        }
     </script>
 </body>
 </html>`;
@@ -1048,15 +1294,18 @@ export class PipelineVisualizerPanel {
 		// Filename-based signals (strongest)
 		if (fileName.toLowerCase().includes('gitlab-ci')) { return 'gitlab'; }
 		if (fileName.toLowerCase().includes('buildspec')) { return 'aws-codebuild'; }
+		if (fileName.toLowerCase().includes('bitbucket-pipelines')) { return 'bitbucket'; }
 		// GitHub Actions: 'on' is the definitive marker
 		if (data.on || (data.jobs && !Array.isArray(data.jobs) && Object.values(data.jobs).some((j: any) => j['runs-on'] || j.uses))) {
 			return 'github';
 		}
-		// AWS CodeBuild: version 0.2 + phases with canonical CodeBuild phase keys
+		// AWS CodeBuild: phases with canonical CodeBuild phase keys
 		const CB_PHASES = new Set(['install', 'pre_build', 'build', 'post_build']);
 		if (data.phases && typeof data.phases === 'object' && Object.keys(data.phases).some(k => CB_PHASES.has(k))) {
 			return 'aws-codebuild';
 		}
+		// Bitbucket Pipelines: 'pipelines' is a unique top-level key
+		if (data.pipelines) { return 'bitbucket'; }
 		// Azure-definitive markers
 		if (data.pool || (data.jobs && Array.isArray(data.jobs)) || data.trigger || data.pr) { return 'azure'; }
 		// GitLab: stages is an array of strings (Azure stages are objects with stage/jobs properties)
