@@ -266,6 +266,8 @@ export class PipelineVisualizerPanel {
 			? '<span class="platform-badge gitlab">🦊 GitLab CI</span>'
 			: platform === 'aws-codebuild'
 			? '<span class="platform-badge aws">🏗️ AWS CodeBuild</span>'
+			: platform === 'aws-cloudformation'
+			? '<span class="platform-badge aws">☁️ AWS CloudFormation</span>'
 			: platform === 'bitbucket'
 			? '<span class="platform-badge bitbucket">🪣 Bitbucket Pipelines</span>'
 			: '<span class="platform-badge azure">☁️ Azure DevOps</span>';
@@ -281,7 +283,7 @@ export class PipelineVisualizerPanel {
 				primary = '#2188ff'; secondary = '#6f42c1'; accent = '#2188ff';
 			} else if (platform === 'gitlab') {
 				primary = '#FC6D26'; secondary = '#E24329'; accent = '#FC6D26';
-			} else if (platform === 'aws-codebuild') {
+			} else if (platform === 'aws-codebuild' || platform === 'aws-cloudformation') {
 				primary = '#FF9900'; secondary = '#C7511F'; accent = '#FF9900';
 			} else if (platform === 'bitbucket') {
 				primary = '#0052CC'; secondary = '#0747A6'; accent = '#0052CC';
@@ -428,6 +430,8 @@ export class PipelineVisualizerPanel {
                         renderGitLab(pipelineData);
                     } else if (detectedPlatform === 'aws-codebuild') {
                         renderAWSCodeBuild(pipelineData);
+                    } else if (detectedPlatform === 'aws-cloudformation') {
+                        renderAWSCloudFormation(pipelineData);
                     } else if (detectedPlatform === 'bitbucket') {
                         renderBitbucket(pipelineData);
                     } else {
@@ -527,6 +531,8 @@ export class PipelineVisualizerPanel {
                     renderGitLab(pipelineData);
                 } else if (detectedPlatform === 'aws-codebuild') {
                     renderAWSCodeBuild(pipelineData);
+                } else if (detectedPlatform === 'aws-cloudformation') {
+                    renderAWSCloudFormation(pipelineData);
                 } else if (detectedPlatform === 'bitbucket') {
                     renderBitbucket(pipelineData);
                 } else {
@@ -1052,6 +1058,105 @@ export class PipelineVisualizerPanel {
             }
         }
 
+        function renderAWSCloudFormation(data) {
+            try {
+                const resources = data.Resources || {};
+                const resourceEntries = Object.entries(resources);
+                const pipelines = resourceEntries.filter(function(e) { return e[1] && e[1].Type === 'AWS::CodePipeline::Pipeline'; });
+                const buildProjects = resourceEntries.filter(function(e) { return e[1] && e[1].Type === 'AWS::CodeBuild::Project'; });
+                const paramCount = data.Parameters ? Object.keys(data.Parameters).length : 0;
+
+                let html = '';
+                if (data.Description) {
+                    html += '<p>' + escapeHtml(data.Description) + '</p>';
+                }
+                html += '<div class="info-grid">';
+                html += '<div class="info-card"><h3>📦 Resources</h3><p>' + resourceEntries.length + ' defined</p></div>';
+                if (paramCount) { html += '<div class="info-card"><h3>⚙️ Parameters</h3><p>' + paramCount + ' defined</p></div>'; }
+                if (pipelines.length) { html += '<div class="info-card"><h3>🔀 Pipelines</h3><p>' + pipelines.length + '</p></div>'; }
+                if (buildProjects.length) { html += '<div class="info-card"><h3>🏗️ CodeBuild Projects</h3><p>' + buildProjects.length + '</p></div>'; }
+                html += '</div>';
+
+                pipelines.forEach(function(pipelineEntry, pIdx) {
+                    var logicalId = pipelineEntry[0];
+                    var pipelineResource = pipelineEntry[1];
+                    var props = pipelineResource.Properties || {};
+                    var pipelineName = typeof props.Name === 'string' ? props.Name : logicalId;
+                    var stages = Array.isArray(props.Stages) ? props.Stages : [];
+                    var diagramDirection = layoutPreference === 'vertical' ? 'TD' : (stages.length <= 6 ? 'LR' : 'TD');
+
+                    html += '<h3 style="margin-top:24px;font-size:15px;opacity:0.8;">🔀 Pipeline: ' + escapeHtml(pipelineName) + '</h3>';
+
+                    var diagram = 'graph ' + diagramDirection + '\\nSTART([Start])';
+                    stages.forEach(function(stage, sIdx) {
+                        var sid = 'CFP' + pIdx + '_' + sIdx;
+                        var label = (stage.Name || ('Stage ' + (sIdx + 1))).replace(/"/g, "'");
+                        diagram += ' --> ' + sid + '["' + label + '"]';
+                    });
+                    diagram += ' --> END([End])';
+                    stages.forEach(function(stage, sIdx) {
+                        var sid = 'CFP' + pIdx + '_' + sIdx;
+                        var color = themePalette[sIdx % themePalette.length];
+                        diagram += '\\nstyle ' + sid + ' fill:' + color + ',stroke:' + color + ',color:#fff';
+                        diagram += '\\nclick ' + sid + ' scrollToCF_' + pIdx + '_' + sIdx;
+                        (function(id) { window['scrollToCF_' + id] = function() { scrollToStage(id); }; })(sid);
+                    });
+                    var edgeCount = stages.length + 1;
+                    for (var i = 0; i < edgeCount; i++) {
+                        diagram += '\\nlinkStyle ' + i + ' stroke:' + themeEdgeColor + ',stroke-width:2px,fill:none';
+                    }
+                    html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
+
+                    stages.forEach(function(stage, sIdx) {
+                        var sid = 'CFP' + pIdx + '_' + sIdx;
+                        var color = themePalette[sIdx % themePalette.length];
+                        var stageName = stage.Name || ('Stage ' + (sIdx + 1));
+                        var actions = Array.isArray(stage.Actions) ? stage.Actions : [];
+                        html += '<div id="' + sid + '" class="stage" style="border-color:' + color + ';background:linear-gradient(135deg,' + color + '33 0%,' + color + '14 100%);">';
+                        html += '<h2 style="background:' + color + ';color:white;">🔀 ' + escapeHtml(stageName) + '</h2>';
+                        actions.forEach(function(action) {
+                            var actionName = action.Name || 'Action';
+                            var typeId = action.ActionTypeId || {};
+                            var providerLabel = typeId.Provider ? ' (' + escapeHtml(typeId.Provider) + ')' : '';
+                            var sid2 = 'step_' + stepCounter++;
+                            allSteps[sid2] = { displayName: actionName, category: typeId.Category, provider: typeId.Provider, owner: typeId.Owner, configuration: action.Configuration, runOrder: action.RunOrder, inputArtifacts: action.InputArtifacts, outputArtifacts: action.OutputArtifacts };
+                            html += '<div class="job" onclick="showStepDetails(\'' + sid2 + '\')" style="cursor:pointer;">';
+                            html += '<h3>' + escapeHtml(actionName) + providerLabel + '</h3>';
+                            if (action.RunOrder) { html += '<p>Run order: ' + action.RunOrder + '</p>'; }
+                            html += '</div>';
+                        });
+                        html += '</div>';
+                    });
+                });
+
+                if (buildProjects.length) {
+                    var cbColor = themePalette[2 % themePalette.length];
+                    html += '<div class="stage" style="border-color:' + cbColor + ';background:linear-gradient(135deg,' + cbColor + '33 0%,' + cbColor + '14 100%);">';
+                    html += '<h2 style="background:' + cbColor + ';color:white;">🏗️ CodeBuild Projects</h2>';
+                    buildProjects.forEach(function(entry) {
+                        var logicalId = entry[0];
+                        var proj = entry[1];
+                        var props = proj.Properties || {};
+                        var name = typeof props.Name === 'string' ? props.Name : logicalId;
+                        var buildSpec = props.Source && props.Source.BuildSpec ? String(props.Source.BuildSpec) : 'inline';
+                        var env = props.Environment || {};
+                        html += '<div class="job">';
+                        html += '<h3>' + escapeHtml(name) + '</h3>';
+                        html += '<p>BuildSpec: <code>' + escapeHtml(buildSpec) + '</code></p>';
+                        if (env.ComputeType) { html += '<p>Compute: ' + escapeHtml(String(env.ComputeType)) + '</p>'; }
+                        if (props.TimeoutInMinutes) { html += '<p>Timeout: ' + props.TimeoutInMinutes + ' min</p>'; }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
+                document.getElementById('content').innerHTML = html;
+                setTimeout(function() { mermaid.run(); }, 100);
+            } catch (error) {
+                showError('Rendering Error', error.message || 'Failed to render CloudFormation visualization.', '<strong>Tip:</strong> Make sure your CloudFormation template has a valid Resources section.');
+            }
+        }
+
         let bbSelectedPipeline = null;
 
         function renderBitbucket(data) {
@@ -1296,6 +1401,13 @@ export class PipelineVisualizerPanel {
 		if (fileName.toLowerCase().includes('gitlab-ci')) { return 'gitlab'; }
 		if (fileName.toLowerCase().includes('buildspec')) { return 'aws-codebuild'; }
 		if (fileName.toLowerCase().includes('bitbucket-pipelines')) { return 'bitbucket'; }
+		// AWS CloudFormation: AWSTemplateFormatVersion is definitive; also catch templates
+		// that omit it but have Resources with AWS:: typed entries
+		if (data.AWSTemplateFormatVersion) { return 'aws-cloudformation'; }
+		if (data.Resources && typeof data.Resources === 'object' &&
+			Object.values(data.Resources as Record<string, any>).some((r: any) => r && r.Type && String(r.Type).startsWith('AWS::'))) {
+			return 'aws-cloudformation';
+		}
 		// GitHub Actions: 'on' is the definitive marker
 		if (data.on || (data.jobs && !Array.isArray(data.jobs) && Object.values(data.jobs).some((j: any) => j['runs-on'] || j.uses))) {
 			return 'github';
