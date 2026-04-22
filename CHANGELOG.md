@@ -2,6 +2,11 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.2.3] - 2026-04-22
+
+### Fixed
+- **Compiled output perpetually showing as modified in git** — TypeScript compiles with LF line endings but git on Windows (`core.autocrlf=true`) expected CRLF, causing `out/extension.js` and `out/visualizerPanel.js` to always appear dirty. Added `.gitattributes` to enforce LF line endings for all source and compiled files.
+
 ## [1.2.2] - 2026-04-22
 
 ### Fixed
