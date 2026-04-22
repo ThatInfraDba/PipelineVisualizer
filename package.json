@@ -2,7 +2,7 @@
   "name": "pipeline-visualizer",
   "displayName": "Pipeline Visualizer",
   "description": "Visualize Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines YAML files with interactive diagrams",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "publisher": "DannydeHaan",
   "icon": "icon.png",
   "repository": {
@@ -99,6 +99,7 @@
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.x",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
@@ -107,7 +108,6 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0",
-    "@types/js-yaml": "^4.0.9"
+    "js-yaml": "^4.1.0"
   }
 }

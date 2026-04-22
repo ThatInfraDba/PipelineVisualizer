@@ -146,6 +146,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.2.4
+
+Bug Fixes:
+- **Fixed: Extension not loading after install — root cause** — `node_modules/**` in `.vscodeignore` was blocking `vsce` from bundling `js-yaml` into the VSIX. The `require("js-yaml")` call at module load time threw `MODULE_NOT_FOUND`, preventing the extension from activating entirely. Removing `node_modules/**` from `.vscodeignore` lets `vsce` bundle production dependencies as intended.
+
 ### 1.2.3
 
 Bug Fixes:
