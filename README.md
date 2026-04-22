@@ -146,6 +146,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.2.3
+
+Bug Fixes:
+- **Fixed: Compiled output perpetually showing as modified in git** — added `.gitattributes` to enforce LF line endings for JS/TS/JSON/YAML files, resolving the CRLF mismatch that caused `out/extension.js` and `out/visualizerPanel.js` to always appear dirty on Windows.
+
 ### 1.2.2
 
 Bug Fixes:
