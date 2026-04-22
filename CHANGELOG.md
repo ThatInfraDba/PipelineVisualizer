@@ -2,6 +2,11 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.2.5] - 2026-04-22
+
+### Fixed
+- **Blank visualization panel for AWS CodeBuild and AWS CodePipeline files** — a `\'` escape sequence inside a TypeScript template literal was consumed by the template literal processor (producing just `'`), resulting in two adjacent string literals (`''`) in the generated webview JavaScript. This caused a `SyntaxError: Unexpected string` that prevented the entire `<script>` block from executing, leaving `#content` empty for all AWS file types. Fixed by using `\\'` in the TypeScript source so the backslash is preserved in the compiled output.
+
 ## [1.2.4] - 2026-04-22
 
 ### Fixed

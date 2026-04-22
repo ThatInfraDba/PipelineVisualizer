@@ -146,6 +146,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.2.5
+
+Bug Fixes:
+- **Fixed: Blank visualization panel for AWS CodeBuild and AWS CodePipeline files** — a TypeScript template literal escape error (`\'` → `'` in output instead of `\'`) produced a `SyntaxError: Unexpected string` in the generated webview script, preventing all rendering from executing and leaving the panel empty for all AWS file types.
+
 ### 1.2.4
 
 Bug Fixes:

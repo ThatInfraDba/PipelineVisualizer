@@ -2,7 +2,7 @@
   "name": "pipeline-visualizer",
   "displayName": "Pipeline Visualizer",
   "description": "Visualize Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines YAML files with interactive diagrams",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "publisher": "DannydeHaan",
   "icon": "icon.png",
   "repository": {

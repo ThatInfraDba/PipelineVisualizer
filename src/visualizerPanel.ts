@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 
 interface ThemeDef {
     mermaidTheme: string;
@@ -272,8 +273,19 @@ export class PipelineVisualizerPanel {
 			? '<span class="platform-badge bitbucket">🪣 Bitbucket Pipelines</span>'
 			: '<span class="platform-badge azure">☁️ Azure DevOps</span>';
 
-		const escapedYaml = yamlContent.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-		const escapedLayoutPref = layoutPreference.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+		// JSON.stringify handles all special characters (backticks, $, \, quotes).
+		// </> prevent </script> tag injection in the HTML script block.
+		const yamlJson = JSON.stringify(yamlContent).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+		const escapedLayoutPref = layoutPreference.replace(/[\\`$]/g, c => '\\' + c);
+
+		// Inline js-yaml to avoid any webview resource URI loading issues.
+		const jsYamlPath = vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'js-yaml', 'dist', 'js-yaml.min.js').fsPath;
+		let jsYamlInline: string;
+		try {
+			jsYamlInline = fs.readFileSync(jsYamlPath, 'utf8').replace(/<\/script>/gi, '<\\/script>');
+		} catch {
+			jsYamlInline = 'console.error("js-yaml could not be loaded");';
+		}
 
 		// Resolve theme, applying platform-specific overrides for the dark theme
 		const themeDef = THEMES[colorTheme] || THEMES['dark'];
@@ -308,10 +320,12 @@ export class PipelineVisualizerPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; font-src https://cdn.jsdelivr.net;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net ${webview.cspSource}; style-src 'unsafe-inline'; font-src https://cdn.jsdelivr.net;">
     <title>Pipeline Visualization</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script>${jsYamlInline}</script>
+    <script async src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"
+        onload="window._mermaidLoaded=true;if(typeof window._onMermaidReady==='function')window._onMermaidReady();"
+        onerror="window._mermaidLoadFailed=true;if(typeof window._onMermaidReady==='function')window._onMermaidReady();"></script>
     <style>
         :root {
             --primary-color: ${primary};
@@ -355,6 +369,12 @@ export class PipelineVisualizerPanel {
         .approval strong { color: #664d03; font-weight: 600; }
         .approval-badge { display: inline-block; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; margin: 10px 0; background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%); color: white; }
         .approval-info { padding: 8px 12px; margin: 8px 0; background: rgba(255, 165, 0, 0.15); border-left: 4px solid #FFA500; border-radius: 4px; font-size: 13px; color: var(--vscode-foreground); }
+        .error-container { padding: 30px; text-align: center; }
+        .error-container h2 { color: ${palette[5]}; font-size: 24px; margin-bottom: 15px; }
+        .error-icon { font-size: 32px; display: block; margin-bottom: 10px; }
+        .error-message { background: ${cardBgValue}; padding: 15px; border-radius: 8px; margin: 15px auto; max-width: 600px; font-family: monospace; font-size: 14px; }
+        .error-help { margin-top: 15px; font-size: 14px; color: ${textColorValue}; opacity: 0.8; }
+        .mermaid-unavailable { padding: 15px; border-radius: 6px; background: ${this._hexToRgba(palette[2], 0.15)}; border-left: 4px solid ${palette[2]}; font-size: 13px; color: ${textColorValue}; }
     </style>
 </head>
 <body class="${platformClass}">
@@ -437,7 +457,7 @@ export class PipelineVisualizerPanel {
                     } else {
                         renderAzure(pipelineData);
                     }
-                    mermaid.init(undefined, document.querySelectorAll('.mermaid'));
+                    runMermaidSafe();
                 } catch (error) {
                     let errorMessage = error.message || 'Unknown error occurred';
                     let errorDetails = '';
@@ -503,17 +523,13 @@ export class PipelineVisualizerPanel {
             modal.style.display = 'block';
         }
 
-        function initAndRender() {
-            try {
-                if (typeof mermaid === 'undefined' || typeof jsyaml === 'undefined') {
-                    showError(
-                        'Scripts Failed to Load',
-                        'Required scripts could not be loaded from the CDN.',
-                        '<strong>Tip:</strong> Check your internet connection and try refreshing. The extension requires access to cdn.jsdelivr.net.'
-                    );
-                    return;
-                }
-
+        // Called either immediately (if mermaid already loaded/failed) or deferred via onload/onerror.
+        function runMermaidSafe() {
+            if (window._mermaidLoadFailed) {
+                document.querySelectorAll('.mermaid-container').forEach(el => {
+                    el.innerHTML = '<div class="mermaid-unavailable">⚠️ Flow diagram requires internet access to cdn.jsdelivr.net — pipeline details are shown above.</div>';
+                });
+            } else if (window._mermaidLoaded && typeof mermaid !== 'undefined') {
                 mermaid.initialize({
                     startOnLoad: false,
                     theme: '${mermaidTheme}',
@@ -521,8 +537,28 @@ export class PipelineVisualizerPanel {
                     securityLevel: 'loose',
                     flowchart: { useMaxWidth: true }
                 });
+                setTimeout(() => mermaid.run(), 100);
+            } else {
+                // Mermaid still downloading asynchronously — register callback.
+                window._onMermaidReady = function() {
+                    window._onMermaidReady = null;
+                    runMermaidSafe();
+                };
+            }
+        }
 
-                const yamlContent = \`${escapedYaml}\`;
+        function initAndRender() {
+            try {
+                if (typeof jsyaml === 'undefined') {
+                    showError(
+                        'YAML Library Failed to Load',
+                        'The js-yaml library could not be loaded.',
+                        '<strong>Tip:</strong> Try reloading the window (Developer: Reload Window) or reinstalling the extension.'
+                    );
+                    return;
+                }
+
+                const yamlContent = ${yamlJson};
                 pipelineData = jsyaml.load(yamlContent);
 
                 if (!pipelineData || typeof pipelineData !== 'object') {
@@ -695,7 +731,7 @@ export class PipelineVisualizerPanel {
             }
 
             document.getElementById('content').innerHTML = html;
-            setTimeout(() => mermaid.run(), 100);
+            runMermaidSafe();
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render Azure pipeline visualization.', '<strong>Tip:</strong> There may be an issue with the pipeline structure. Please check your YAML file.');
             }
@@ -782,7 +818,7 @@ export class PipelineVisualizerPanel {
             }
 
             document.getElementById('content').innerHTML = html;
-            setTimeout(() => mermaid.run(), 100);
+            runMermaidSafe();
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render GitHub Actions visualization.', '<strong>Tip:</strong> There may be an issue with the workflow structure. Please check your YAML file.');
             }
@@ -940,7 +976,7 @@ export class PipelineVisualizerPanel {
                 });
 
                 document.getElementById('content').innerHTML = html;
-                setTimeout(() => mermaid.run(), 100);
+                runMermaidSafe();
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render GitLab CI visualization.', '<strong>Tip:</strong> There may be an issue with the pipeline structure. Please check your .gitlab-ci.yml file.');
             }
@@ -1067,7 +1103,7 @@ export class PipelineVisualizerPanel {
                 }
 
                 document.getElementById('content').innerHTML = html;
-                setTimeout(() => mermaid.run(), 100);
+                runMermaidSafe();
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render AWS CodeBuild visualization.', '<strong>Tip:</strong> There may be an issue with the buildspec structure. Please check your buildspec.yml file.');
             }
@@ -1136,7 +1172,7 @@ export class PipelineVisualizerPanel {
                             var providerLabel = typeId.Provider ? ' (' + escapeHtml(typeId.Provider) + ')' : '';
                             var sid2 = 'step_' + stepCounter++;
                             allSteps[sid2] = { displayName: actionName, category: typeId.Category, provider: typeId.Provider, owner: typeId.Owner, configuration: action.Configuration, runOrder: action.RunOrder, inputArtifacts: action.InputArtifacts, outputArtifacts: action.OutputArtifacts };
-                            html += '<div class="job" onclick="showStepDetails(\'' + sid2 + '\')" style="cursor:pointer;">';
+                            html += '<div class="job" onclick="showStepDetails(\\'' + sid2 + '\\')" style="cursor:pointer;">';
                             html += '<h3>' + escapeHtml(actionName) + providerLabel + '</h3>';
                             if (action.RunOrder) { html += '<p>Run order: ' + action.RunOrder + '</p>'; }
                             html += '</div>';
@@ -1167,7 +1203,7 @@ export class PipelineVisualizerPanel {
                 }
 
                 document.getElementById('content').innerHTML = html;
-                setTimeout(function() { mermaid.run(); }, 100);
+                runMermaidSafe();
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render CloudFormation visualization.', '<strong>Tip:</strong> Make sure your CloudFormation template has a valid Resources section.');
             }
@@ -1402,7 +1438,7 @@ export class PipelineVisualizerPanel {
                         renderBitbucket(data);
                     });
                 }
-                setTimeout(function() { mermaid.run(); }, 100);
+                runMermaidSafe();
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render Bitbucket Pipelines visualization.', '<strong>Tip:</strong> Please check your bitbucket-pipelines.yml file.');
             }
