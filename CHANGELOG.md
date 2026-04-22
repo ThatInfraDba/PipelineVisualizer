@@ -2,6 +2,11 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.2.4] - 2026-04-22
+
+### Fixed
+- **Critical: Extension not loading after install — root cause** — `node_modules/**` in `.vscodeignore` was preventing `vsce` from bundling the `js-yaml` runtime dependency into the VSIX. At load time, `require("js-yaml")` threw `MODULE_NOT_FOUND`, the extension module failed entirely, and the command was never registered. Removed `node_modules/**` from `.vscodeignore` so `vsce` bundles production dependencies correctly. Also moved `@types/js-yaml` from `dependencies` to `devDependencies` as it is a compile-time type definition only.
+
 ## [1.2.3] - 2026-04-22
 
 ### Fixed
