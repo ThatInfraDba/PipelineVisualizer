@@ -468,7 +468,7 @@ export class PipelineVisualizerPanel {
 
         const modal = document.getElementById('stepModal');
         const closeBtn = document.getElementsByClassName('close')[0];
-        closeBtn.onclick = () => modal.style.display = 'none';
+        if (closeBtn) { closeBtn.onclick = () => modal.style.display = 'none'; }
         window.onclick = (e) => { if (e.target == modal) modal.style.display = 'none'; };
         document.addEventListener('keydown', (e) => { if (e.key === 'Escape') modal.style.display = 'none'; });
 
@@ -503,16 +503,25 @@ export class PipelineVisualizerPanel {
             modal.style.display = 'block';
         }
 
-        window.addEventListener('load', () => {
-            mermaid.initialize({
-                startOnLoad: false,
-                theme: '${mermaidTheme}',
-                themeVariables: ${JSON.stringify(mermaidThemeVariables)},
-                securityLevel: 'loose',
-                flowchart: { useMaxWidth: true }
-            });
-
+        function initAndRender() {
             try {
+                if (typeof mermaid === 'undefined' || typeof jsyaml === 'undefined') {
+                    showError(
+                        'Scripts Failed to Load',
+                        'Required scripts could not be loaded from the CDN.',
+                        '<strong>Tip:</strong> Check your internet connection and try refreshing. The extension requires access to cdn.jsdelivr.net.'
+                    );
+                    return;
+                }
+
+                mermaid.initialize({
+                    startOnLoad: false,
+                    theme: '${mermaidTheme}',
+                    themeVariables: ${JSON.stringify(mermaidThemeVariables)},
+                    securityLevel: 'loose',
+                    flowchart: { useMaxWidth: true }
+                });
+
                 const yamlContent = \`${escapedYaml}\`;
                 pipelineData = jsyaml.load(yamlContent);
 
@@ -554,7 +563,13 @@ export class PipelineVisualizerPanel {
 
                 showError('YAML Parsing Error', errorMessage, errorDetails);
             }
-        });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initAndRender);
+        } else {
+            initAndRender();
+        }
 
         function renderAzure(data) {
             try {
@@ -1097,9 +1112,10 @@ export class PipelineVisualizerPanel {
                     stages.forEach(function(stage, sIdx) {
                         var sid = 'CFP' + pIdx + '_' + sIdx;
                         var color = themePalette[sIdx % themePalette.length];
+                        var clickName = 'scrollToCF_' + pIdx + '_' + sIdx;
                         diagram += '\\nstyle ' + sid + ' fill:' + color + ',stroke:' + color + ',color:#fff';
-                        diagram += '\\nclick ' + sid + ' scrollToCF_' + pIdx + '_' + sIdx;
-                        (function(id) { window['scrollToCF_' + id] = function() { scrollToStage(id); }; })(sid);
+                        diagram += '\\nclick ' + sid + ' ' + clickName;
+                        (function(name, id) { window[name] = function() { scrollToStage(id); }; })(clickName, sid);
                     });
                     var edgeCount = stages.length + 1;
                     for (var i = 0; i < edgeCount; i++) {
