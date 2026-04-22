@@ -146,6 +146,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.2.2
+
+Bug Fixes:
+- **Fixed: Extension not loading after install (v1.2.1 fix incomplete)** — `!out/**` in `.vscodeignore` cannot override a gitignored parent directory due to how `vsce` enforces git's parent-directory rule. Removed `out` from `.gitignore` entirely — the compiled output is now always included in the VSIX package.
+
 ### 1.2.1
 
 Bug Fixes:

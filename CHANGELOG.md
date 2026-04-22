@@ -2,6 +2,11 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.2.2] - 2026-04-22
+
+### Fixed
+- **Critical: Extension not loading after install (v1.2.1 fix incomplete)** — the v1.2.1 fix added `!out/**` to `.vscodeignore` to negate the `.gitignore` exclusion of `out/`, but `vsce` enforces git's parent-directory rule: when a directory is excluded in `.gitignore`, its contents cannot be re-included by a negation pattern. Removed `out` from `.gitignore` entirely so compiled output is always included in the VSIX.
+
 ## [1.2.1] - 2026-04-22
 
 ### Fixed
