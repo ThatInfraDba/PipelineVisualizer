@@ -1,19 +1,22 @@
 # Pipeline Visualizer - VS Code Extension
 
-Visualize your Azure DevOps and GitHub Actions YAML pipeline files directly in VS Code with beautiful, interactive diagrams!
+Visualize your CI/CD pipeline YAML files directly in VS Code with beautiful, interactive diagrams! Supports Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines.
 
 🔗 **[GitHub Repository](https://github.com/ThatInfraDba/PipelineVisualizer)** | 📦 **[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=DannydeHaan.pipeline-visualizer)** | 💖 **[Sponsor this Project](https://github.com/sponsors/ThatInfraDba)**
 
+> **Note:** GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new in v1.2.0 and still undergoing testing. Please report any issues on GitHub.
+
 ## Features
 
-- **🤖 Auto-Detection** - Automatically identifies whether your YAML is an Azure DevOps Pipeline or GitHub Actions Workflow
+- **🤖 Auto-Detection** - Automatically identifies Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines
 - **📊 Interactive Diagrams** - Visual flowcharts powered by Mermaid.js showing your pipeline structure
 - **🎨 Color-Coded Stages** - Each stage gets a unique color for easy differentiation
 - **🖱️ Clickable Nodes** - Click any stage in the diagram to jump to its details
 - **🔍 Step Details** - Click any step to view detailed configuration, scripts, and parameters
 - **🔄 Refresh Button** - Update visualization without closing the panel when you edit your YAML
 - **⚙️ Layout Options** - Choose between automatic, horizontal, or vertical diagram layouts
-- **🌈 Platform Theming** - Azure (blue/purple) and GitHub (blue) themed visualizations
+- **🌈 Color Themes** - Six built-in themes: dark, light, ocean, forest, sunset, and monochrome
+- **🗂️ Pipeline Selector** - Switch between named Bitbucket pipelines (default, branches, PRs, tags, custom) without leaving the panel
 - **⚡ Instant Visualization** - Works directly from the editor with no external tools needed
 - **📁 Context Menu Integration** - Right-click any YAML file to visualize
 
@@ -40,7 +43,7 @@ code --install-extension DannydeHaan.pipeline-visualizer
 
 ### From Editor
 
-1. Open any Azure DevOps Pipeline or GitHub Actions Workflow YAML file
+1. Open any supported CI/CD pipeline YAML file (Azure DevOps, GitHub Actions, GitLab, AWS CodeBuild, or Bitbucket)
 2. Click the **graph icon** in the editor title bar, OR
 3. Right-click in the editor and select **"Pipeline: Visualize"**, OR
 4. Open Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and run **"Pipeline: Visualize"**
@@ -84,6 +87,27 @@ The extension will:
 - Runners (`runs-on:`)
 - Step conditions and parameters
 
+### GitLab CI/CD Pipelines _(new in v1.2.0 — additional testing in progress)_
+- Jobs and stages
+- Job dependencies (`needs:`, `dependencies:`)
+- Artifacts and caches
+- Rules and conditions
+- Services and environment configuration
+
+### AWS CodeBuild Buildspec _(new in v1.2.0 — additional testing in progress)_
+- Build phases (install, pre-build, build, post-build)
+- Runtime versions
+- Artifacts and secondary artifacts
+- Cache configuration
+- Environment variables
+
+### Bitbucket Pipelines _(new in v1.2.0 — additional testing in progress)_
+- Default, branch, PR, tag, and custom pipeline variants
+- Pipeline selector dropdown to switch between named pipelines
+- Parallel step groups
+- Stages and deployment steps
+- Service containers and caches
+
 ## Extension Settings
 
 This extension contributes the following settings:
@@ -93,10 +117,19 @@ This extension contributes the following settings:
   - `horizontal`: Always left-to-right layout
   - `vertical`: Always top-to-bottom layout
 
+* `pipelineVisualizer.colorTheme`: Control the color theme of the visualization panel
+  - `dark` (default): Dark background with vibrant multi-color palette
+  - `light`: Light background with deep, saturated colors
+  - `ocean`: Deep navy background with blue spectrum palette
+  - `forest`: Dark green background with earthy green palette
+  - `sunset`: Dark amber background with warm orange and red palette
+  - `monochrome`: Near-black background with blue-grey palette
+
 ## Known Issues
 
 - Very large pipeline files (>1000 lines) may take a moment to render
 - Complex Mermaid diagrams with many dependencies might need horizontal scrolling
+- GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and may not handle all edge cases — please report issues on GitHub
 
 ## Support This Project
 
@@ -111,6 +144,18 @@ If you find this extension helpful:
 ---
 
 ## Release Notes
+
+### 1.2.0
+
+New Platform Support:
+- **GitLab CI/CD** — visualize `.gitlab-ci.yml` files with jobs, stages, dependencies, and artifacts
+- **AWS CodeBuild** — visualize `buildspec.yml` files with build phases, runtimes, and artifacts
+- **Bitbucket Pipelines** — visualize `bitbucket-pipelines.yml` files with a pipeline selector dropdown for switching between default, branch, PR, tag, and custom pipeline variants
+
+New Features:
+- **Color Themes** — six built-in themes (dark, light, ocean, forest, sunset, monochrome) configurable via extension settings
+
+> GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and still undergoing testing. Please report any issues.
 
 ### 1.1.0
 

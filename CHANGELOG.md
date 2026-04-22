@@ -2,6 +2,16 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.2.0] - 2026-04-22
+
+### Added
+- **GitLab CI/CD support** — auto-detects `.gitlab-ci.yml` files and visualizes jobs, stages, dependencies (`needs:`, `dependencies:`), artifacts, caches, rules, services, and environments
+- **AWS CodeBuild support** — auto-detects `buildspec.yml` files and visualizes build phases (install, pre-build, build, post-build), runtime versions, artifacts, secondary artifacts, cache, and environment variables
+- **Bitbucket Pipelines support** — auto-detects `bitbucket-pipelines.yml` files and visualizes steps, parallel groups, stages, and deployment steps; includes a pipeline selector dropdown to switch between default, branch, PR, tag, and custom pipeline variants without leaving the panel
+- **Color Themes** — six built-in visualization themes configurable via `pipelineVisualizer.colorTheme`: `dark` (default), `light`, `ocean`, `forest`, `sunset`, `monochrome`
+
+> **Note:** GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new in this release and may not cover all edge cases. Please report issues at [GitHub](https://github.com/ThatInfraDba/PipelineVisualizer/issues).
+
 ## [1.1.0] - 2026-04-21
 
 ### Fixed

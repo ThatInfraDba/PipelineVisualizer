@@ -76,9 +76,9 @@ Thank you for your interest in contributing! 🎉
 PipelineVisualizer/
 ├── src/
 │   ├── extension.ts          # Extension entry point
-│   └── visualizerPanel.ts    # Webview panel implementation
-├── package.json              # Extension manifest
-├── tsconfig.json            # TypeScript config
+│   └── visualizerPanel.ts    # Webview panel and all platform renderers
+├── package.json              # Extension manifest and settings schema
+├── tsconfig.json             # TypeScript config (required — compile uses tsc -p ./)
 └── README.md
 ```
 
@@ -100,15 +100,28 @@ npm run watch
 - Keep functions focused and small
 - Use descriptive variable names
 
+## Supported Platforms
+
+The extension auto-detects the following pipeline formats:
+- **Azure DevOps** — `azure-pipelines.yml` and files with `stages:` / `jobs:` / `pool:` keys
+- **GitHub Actions** — files under `.github/workflows/` or with `on:` + `jobs:` keys
+- **GitLab CI/CD** — `.gitlab-ci.yml` and files with `stages:` + job definitions
+- **AWS CodeBuild** — `buildspec.yml` and files with `phases:` key
+- **Bitbucket Pipelines** — `bitbucket-pipelines.yml` and files with `pipelines:` key
+
 ## Testing
 
 Before submitting a PR:
 - ✅ Test with Azure DevOps pipelines
 - ✅ Test with GitHub Actions workflows
+- ✅ Test with GitLab CI/CD pipelines (`.gitlab-ci.yml`)
+- ✅ Test with AWS CodeBuild buildspec files (`buildspec.yml`)
+- ✅ Test with Bitbucket Pipelines (`bitbucket-pipelines.yml`)
 - ✅ Test with invalid YAML (error handling)
 - ✅ Test the refresh button
 - ✅ Test clickable diagram nodes
 - ✅ Test different layout configurations
+- ✅ Test all six color themes
 
 ## Questions?
 
