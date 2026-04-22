@@ -9,3 +9,4 @@ package-lock.json
 icon.svg
 FUNDING.yml
 CONTRIBUTING.md
+!out/**
