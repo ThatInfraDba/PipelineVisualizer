@@ -26,7 +26,10 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		// Get the YAML content
-		const yamlContent = document.getText();
+		const rawYaml = document.getText();
+		// Strip custom YAML tags (e.g. CloudFormation !Sub, !Ref, !GetAtt) that
+		// js-yaml rejects as unknown. Tag semantics are not needed for visualization.
+		const yamlContent = rawYaml.replace(/![A-Za-z][A-Za-z0-9]*/g, '');
 
 		try {
 			// Parse YAML to validate it

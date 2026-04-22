@@ -2,6 +2,13 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.2.1] - 2026-04-22
+
+### Fixed
+- **Critical: Extension not loading after install** — `out/` was listed in `.gitignore` (added during v1.2.0 development), causing `vsce` to exclude the compiled JavaScript from the VSIX package. Every fresh installation resulted in `command 'pipelineVisualizer.visualize' not found`. Debug (F5) was unaffected because it reads from disk directly.
+- **Blank visualization panel for AWS files** — `mermaid.initialize()` was called outside the try-catch block; any initialization failure silently blanked the page with no error message. Now wrapped with CDN availability checks and proper error reporting.
+- **AWS CloudFormation stage click navigation broken** — Mermaid click handler names for CloudFormation pipeline stages were mismatched with their registered `window` functions, so clicking diagram nodes did nothing.
+
 ## [1.2.0] - 2026-04-22
 
 ### Added
