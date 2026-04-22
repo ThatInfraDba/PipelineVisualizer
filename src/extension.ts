@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
+import * as path from 'path';
 import { PipelineVisualizerPanel } from './visualizerPanel';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -15,32 +16,34 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const document = editor.document;
-		const fileName = document.fileName;
-		
+		const filePath = document.fileName;
+		const fileName = path.basename(filePath);
+
 		// Check if it's a YAML file
-		if (!fileName.endsWith('.yml') && !fileName.endsWith('.yaml')) {
+		if (!filePath.endsWith('.yml') && !filePath.endsWith('.yaml')) {
 			vscode.window.showWarningMessage('Please open a YAML file to visualize.');
 			return;
 		}
 
 		// Get the YAML content
 		const yamlContent = document.getText();
-		
+
 		try {
 			// Parse YAML to validate it
 			const pipelineData = yaml.load(yamlContent);
-			
+
 			if (!pipelineData || typeof pipelineData !== 'object') {
 				vscode.window.showErrorMessage('Invalid YAML content.');
 				return;
 			}
 
-			// Get user preference for diagram layout
+			// Get user preferences
 			const config = vscode.workspace.getConfiguration('pipelineVisualizer');
 			const layoutPreference = config.get<string>('diagramLayout', 'automatic');
+			const colorTheme = config.get<string>('colorTheme', 'dark');
 
 			// Create and show the visualizer panel
-			PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, pipelineData, layoutPreference);
+			PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
 			
 		} catch (error) {
 			vscode.window.showErrorMessage(`Error parsing YAML: ${error}`);
