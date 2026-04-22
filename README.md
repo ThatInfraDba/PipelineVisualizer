@@ -130,6 +130,7 @@ This extension contributes the following settings:
 - Very large pipeline files (>1000 lines) may take a moment to render
 - Complex Mermaid diagrams with many dependencies might need horizontal scrolling
 - GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and may not handle all edge cases — please report issues on GitHub
+- If the visualization panel shows a "Scripts Failed to Load" error, check that your machine can reach `cdn.jsdelivr.net` (required for Mermaid and js-yaml)
 
 ## Support This Project
 
@@ -144,6 +145,13 @@ If you find this extension helpful:
 ---
 
 ## Release Notes
+
+### 1.2.1
+
+Bug Fixes:
+- **Fixed: Extension not loading after install** — compiled output was excluded from the VSIX package due to a `.gitignore` conflict, causing `command 'pipelineVisualizer.visualize' not found` on every fresh installation
+- **Fixed: Blank visualization panel for AWS files** — initialization errors now show a visible message instead of silently leaving the panel empty
+- **Fixed: AWS CloudFormation stage click navigation** — clicking pipeline stage nodes in the diagram now correctly scrolls to the corresponding detail card
 
 ### 1.2.0
 
