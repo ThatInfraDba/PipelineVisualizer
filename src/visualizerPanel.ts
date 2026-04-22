@@ -180,7 +180,8 @@ export class PipelineVisualizerPanel {
 					case 'refresh':
 						if (this._documentUri) {
 							vscode.workspace.openTextDocument(this._documentUri).then(document => {
-								const yamlContent = document.getText();
+								const rawYaml = document.getText();
+								const yamlContent = rawYaml.replace(/![A-Za-z][A-Za-z0-9]*/g, '');
 								try {
 									const pipelineData = require('js-yaml').load(yamlContent);
 									this._panel.webview.postMessage({
