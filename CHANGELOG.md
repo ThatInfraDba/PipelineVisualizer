@@ -2,6 +2,11 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.3.2] - 2026-06-03
+
+### Fixed
+- **Blank visualization panel — js-yaml CDN dependency** — v1.3.0 reverted from the v1.2.5 bundled js-yaml approach back to CDN loading, breaking rendering in environments without access to `cdn.jsdelivr.net`. Changed to load js-yaml from the bundled `node_modules/js-yaml/dist/js-yaml.min.js` via `webview.asWebviewUri()` — same pattern used for `media/webview.js` — so no CDN access is required for YAML parsing
+
 ## [1.3.1] - 2026-06-03
 
 ### Fixed

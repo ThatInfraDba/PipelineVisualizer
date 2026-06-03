@@ -148,6 +148,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.3.2
+
+Bug Fixes:
+- **Fixed: Blank visualization panel — js-yaml CDN dependency** — v1.3.0 reverted to loading js-yaml from CDN, breaking rendering in environments without `cdn.jsdelivr.net` access. Now loads from the bundled `node_modules/js-yaml/dist/js-yaml.min.js` — no internet required for YAML parsing
+
 ### 1.3.1
 
 Bug Fixes:

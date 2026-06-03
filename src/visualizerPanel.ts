@@ -330,6 +330,7 @@ export class PipelineVisualizerPanel {
 
 	private _getHtmlForWebview(webview: vscode.Webview, pipelineData: any, layoutPreference: string, colorTheme: string, fileName: string = ''): string {
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'webview.js'));
+		const jsYamlUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'js-yaml', 'dist', 'js-yaml.min.js'));
 		const platform = this._detectPlatform(pipelineData, fileName);
 		const platformClass = platform === 'github' ? 'github-mode' : '';
 		const platformBadge = platform === 'github'
@@ -383,7 +384,7 @@ export class PipelineVisualizerPanel {
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net ${webview.cspSource}; style-src 'unsafe-inline'; font-src https://cdn.jsdelivr.net;">
     <title>Pipeline Visualization</title>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script nonce="${nonce}" src="${jsYamlUri}"></script>
     <style>
         :root {
             --primary-color: ${primary};
