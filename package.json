@@ -2,7 +2,7 @@
   "name": "pipeline-visualizer",
   "displayName": "Pipeline Visualizer",
   "description": "Visualize Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines YAML files with interactive diagrams",
-  "version": "1.2.5",
+  "version": "1.3.1",
   "publisher": "DannydeHaan",
   "icon": "icon.png",
   "repository": {
@@ -76,14 +76,16 @@
         "pipelineVisualizer.colorTheme": {
           "type": "string",
           "default": "dark",
-          "enum": ["dark", "light", "ocean", "forest", "sunset", "monochrome"],
+          "enum": ["dark", "light", "ocean", "forest", "sunset", "monochrome", "colorblind", "highcontrast"],
           "enumDescriptions": [
             "Dark background with vibrant multi-color stage palette (default)",
             "Light background with deep, saturated colors — best with light VS Code themes",
             "Deep navy background with a blue spectrum palette",
             "Dark green background with an earthy green palette",
             "Dark amber background with a warm orange and red palette",
-            "Near-black background with a blue-grey palette"
+            "Near-black background with a blue-grey palette",
+            "Dark background with the Okabe-Ito palette — safe for deuteranopia, protanopia, and tritanopia",
+            "Near-black background with the IBM colorblind palette — WCAG AA contrast and broad colorblind safety"
           ],
           "description": "Controls the color theme of the pipeline visualization panel"
         }

@@ -2,6 +2,23 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.3.1] - 2026-06-03
+
+### Fixed
+- **v1.3.0 built from stale branch** — v1.3.0 was tagged before merging into main, so it was missing fixes from v1.2.2 through v1.2.5 (VSIX packaging, js-yaml bundling, LF line endings, AWS blank panel). This release is v1.3.0 rebuilt from the correct base (main with all prior fixes included)
+
+## [1.3.0] - 2026-06-03
+
+### Added
+- **Colorblind-accessible themes** — two new themes for users with color vision deficiencies:
+  - `colorblind`: dark background using the Okabe-Ito palette, which is distinguishable under deuteranopia, protanopia, and tritanopia
+  - `highcontrast`: near-black background using the IBM colorblind palette — WCAG AA contrast with broad colorblind safety
+
+### Fixed
+- **Blank visualization panel** — switched to nonce-based Content Security Policy for the webview inline script; `'unsafe-inline'` was no longer reliably honoured in newer VS Code versions, causing the rendering script to be silently blocked
+- **Persistent SyntaxError causing blank panel** — moved the entire webview rendering script to an external static file (`media/webview.js`) loaded via `<script src="...">`, eliminating a parse-time `SyntaxError: Unexpected string` caused by VS Code webview's Chromium version rejecting the ~1000-line inline script embedded inside a template literal with CRLF line endings. Configuration is now passed via a tiny inline `window.pvConfig` object; pipeline YAML data is delivered via postMessage handshake
+- **Step detail popups not opening** — inline `onclick=` event handlers in dynamically-injected HTML are blocked by the nonce-based CSP (which has no `'unsafe-inline'` in `script-src`). Replaced all inline handlers with `data-step` attributes and a single delegated `click` listener on the content container. Also fixed the Refresh button by the same mechanism
+
 ## [1.2.5] - 2026-04-22
 
 ### Fixed

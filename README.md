@@ -124,6 +124,8 @@ This extension contributes the following settings:
   - `forest`: Dark green background with earthy green palette
   - `sunset`: Dark amber background with warm orange and red palette
   - `monochrome`: Near-black background with blue-grey palette
+  - `colorblind`: Dark background with Okabe-Ito palette — safe for deuteranopia, protanopia, and tritanopia
+  - `highcontrast`: Near-black background with IBM colorblind palette — WCAG AA contrast and broad colorblind safety
 
 ## Known Issues
 
@@ -145,6 +147,23 @@ If you find this extension helpful:
 ---
 
 ## Release Notes
+
+### 1.3.1
+
+Bug Fixes:
+- **Fixed: v1.3.0 missing prior fixes** — v1.3.0 was tagged before merging into main and was missing v1.2.2–v1.2.5 fixes (VSIX packaging, js-yaml bundling, LF line endings, AWS blank panel). This release is a corrected build from the proper base.
+
+### 1.3.0
+
+New Features:
+- **Colorblind-accessible themes** — two new themes selectable via `pipelineVisualizer.colorTheme`:
+  - `colorblind`: dark background using the Okabe-Ito palette, safe for deuteranopia, protanopia, and tritanopia
+  - `highcontrast`: near-black background using the IBM colorblind palette, WCAG AA contrast with broad colorblind safety
+
+Bug Fixes:
+- **Fixed: Blank visualization panel** — switched to nonce-based CSP; `'unsafe-inline'` is no longer reliably honoured in newer VS Code versions
+- **Fixed: Blank visualization panel (persistent SyntaxError)** — moved the webview rendering script to an external static file; VS Code webview's Chromium version was rejecting the large inline script embedded in a template literal with CRLF endings. Config is now a tiny inline object; YAML is delivered via postMessage
+- **Fixed: Step detail popups not opening** — inline `onclick=` handlers in dynamically-injected HTML are blocked by the nonce-based CSP. Replaced with `data-step` attributes and a delegated click listener; Refresh button fixed by the same mechanism
 
 ### 1.2.5
 
