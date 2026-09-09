@@ -2,6 +2,17 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **VS Code integration test suite** — `@vscode/test-electron` + Mocha now drive the real `pipelineVisualizer.visualize` command against every sample pipeline (Azure DevOps, GitHub Actions, GitLab CI, AWS CodeBuild, AWS CloudFormation, Bitbucket Pipelines x2), asserting the correct platform badge renders and no error is shown. A negative test confirms invalid YAML is handled gracefully. Run via `npm test`; CI runs it headless via `xvfb-run`
+- **Sample pipelines for previously-untested platforms** — added `samples/azure-pipeline.yaml` and `samples/github-workflow.yaml`; every supported platform now has test coverage
+- **CI workflow** (`.github/workflows/ci.yml`) — runs compile, lint, `npm audit`, and the full integration test suite on every push/PR to `main`
+- **Dependabot** (`.github/dependabot.yml`) — weekly npm + GitHub Actions dependency update PRs, plus repo-level vulnerability alerts enabled so security-advisory PRs open automatically; reviewer is requested on each PR to trigger GitHub's email notification
+
+### Fixed
+- **Broken lint script** — `npm run lint` had no ESLint config and failed outright, which silently blocked `npm test` (a `pretest` hook runs `compile && lint`). Added a minimal `.eslintrc.json` and fixed the resulting findings: dropped a dead `escapedLayoutPref` computation, replaced a `require()` call with a static `js-yaml` import, and switched a `let` destructure to `const` for values that are never reassigned
+
 ## [1.3.3] - 2026-09-09
 
 ### Security

@@ -1,0 +1,318 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: My example codepipeline template
+
+# ------------------------- #
+# CloudFormation Parameters #
+# ------------------------- #
+
+Parameters:
+
+  ENV:
+    Description: Name of the environment for tag metadata
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /cloudformation/parameters/env
+
+  CodeBuildEnvironmentComputeType:
+    Type: String
+    Default: BUILD_GENERAL1_SMALL
+    AllowedValues:
+      - BUILD_GENERAL1_SMALL
+      - BUILD_GENERAL1_MEDIUM
+      - BUILD_GENERAL1_LARGE
+
+  CodeBuildImage:
+    Description: The codebuild runtime image to use in the Codebuild project
+    Type: String
+    Default: "aws/codebuild/standard:2.0"
+
+  GithubRepoBranch:
+    Description: The git branch that will be polled for changes
+    Type: String
+    Default: "master"
+
+  GitHubOAuthToken:
+    NoEcho: 'true'  # Do not display in CloudFormation
+    Type: String
+    Default: ""
+
+  GithubRepoOwner:
+    Description: The owner of the repository on GitHub
+    Type: String
+    Default: "my-github-org"
+
+  GithubRepo:
+    Description: The git repository base name
+    Type: String
+    Default: "my-repo"
+
+# ------------------------ #
+# CloudFormation Resources #
+# ------------------------ #
+
+Resources:
+
+  # S3 Bucket where build artifacts and cache will be uploaded.
+  BuildArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  # IAM role for codebuild project. Should give access all AWS resources needed by build and tests run by build.
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codebuild.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Allow code build to stream logs
+              - Sid: CloudWatchLogsPolicy
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+
+  # IAM role for pipeline.
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: codepipeline.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3AccessPolicy
+                Effect: Allow
+                Action:
+                  - S3:List*
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource:
+                  - !Sub "arn:aws:s3:::${BuildArtifactBucket}"
+                  - !Sub "arn:aws:s3:::${BuildArtifactBucket}/*"
+              - Sid: CodeBuildAccessPolicy
+                Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                Resource:
+                  - !GetAtt CodeBuildProjectTest.Arn
+                  - !GetAtt CodeBuildProjectDeploy.Arn
+                  - !GetAtt CodeBuildProjectTagRepo.Arn
+              - Sid: EventsAccessPolicy
+                Effect: Allow
+                Action: events:PutEvents
+                Resource: "*"
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: "*"
+
+  ### Codebuild projects
+  CodeBuildProjectTest:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${ShortName}-test"
+      Description: CodePipeline standard build stage provider.
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: cicd/buildspecs/test.yml
+      Artifacts:
+        Type: CODEPIPELINE
+      Cache:
+        Location: !Sub "arn:aws:s3:::${BuildArtifactBucket}"
+        Type: S3
+      TimeoutInMinutes: 5
+      Environment:
+        ComputeType: !Ref CodeBuildEnvironmentComputeType
+        Image: !Ref CodeBuildImage
+        Type: LINUX_CONTAINER
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+
+  CodeBuildProjectDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-deploy"
+      Description: CodePipeline serverless deployer.
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: cicd/buildspecs/deploy.yml
+      Artifacts:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 10
+      Environment:
+        ComputeType: !Ref CodeBuildEnvironmentComputeType
+        Image: !Ref CodeBuildImage
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: S3_BUCKET
+            Value: !Ref S3SiteBucket
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+
+  CodeBuildProjectTagRepo:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-deploy-tag-repo"
+      Description: CodePipeline standard build stage provider.
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: cicd/buildspecs/tag_repo.yml
+      Artifacts:
+        Type: CODEPIPELINE
+      TimeoutInMinutes: 5
+      Environment:
+        ComputeType: !Ref CodeBuildEnvironmentComputeType
+        Image: !Ref CodeBuildImage
+        Type: LINUX_CONTAINER
+        EnvironmentVariables:
+          - Name: ENV
+            Value: !Ref ENV
+          - Name: GIT_REPO
+            Value: !Sub "${GithubRepoOwner}/${GithubRepo}"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+
+  # Pipeline for running build.
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Sub "${AWS::StackName}"
+      ArtifactStore:
+        Location: !Ref BuildArtifactBucket
+        Type: S3
+      RestartExecutionOnUpdate: false
+      RoleArn: !GetAtt CodePipelineRole.Arn
+      Stages:
+
+        - Name: Source
+          Actions:
+            - Name: Source
+              RunOrder: 1
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              Configuration:
+                Owner: !Ref GithubRepoOwner
+                Repo: !Ref GithubRepo
+                Branch: !Ref GithubRepoBranch
+                OAuthToken: !Ref GitHubOAuthToken
+              OutputArtifacts:
+                - Name: SourceOutput
+
+        - Name: Test
+          Actions:
+            - Name: Test
+              RunOrder: 1
+              ActionTypeId:
+                Category: Test
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectTest
+              InputArtifacts:
+                - Name: SourceOutput
+              OutputArtifacts:
+                - Name: TestOutput
+
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectDeploy
+              InputArtifacts:
+                - Name: TestOutput
+            - Name: TagRepo
+              RunOrder: 2
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref CodeBuildProjectTagRepo
+              InputArtifacts:
+                - Name: SourceOutput
+
+  ### Notifications
+
+  # Failure notifications
+  CodePipelineStateFailureEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Rule for sending failure notifications to SNS topic"
+      EventPattern:
+        source:
+          - aws.codepipeline
+        detail-type:
+          - CodePipeline Action Execution State Change
+        detail:
+          pipeline:
+            - !Ref CodePipeline
+          stage:
+            - Deploy
+            - Test
+            - Source
+          state:
+            - FAILED
+      State: "ENABLED"
+      Targets:
+        - Arn: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:CodebuildNotifications"
+          Id: "CodePipelineFailureNotifications"
+          InputTransformer:
+            InputTemplate: !Sub '"${ENV} <stage> stage has <state> for <pipeline> pipeline! Pipeline view: https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${AWS::StackName}/view"'
+            InputPathsMap:
+              pipeline: "$.detail.pipeline"
+              stage: "$.detail.stage"
+              state: "$.detail.state"
+  # Successful deployment notifications
+  CodePipelineSuccessfulDeployEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "Rule for sending failure notifications to SNS topic"
+      EventPattern:
+        source:
+          - aws.codepipeline
+        detail-type:
+          - CodePipeline Stage Execution State Change
+        detail:
+          pipeline:
+            - !Ref CodePipeline
+          stage:
+            - Deploy
+          state:
+            - SUCCEEDED
+      State: "ENABLED"
+      Targets:
+        - Arn: !Sub "arn:aws:sns:${AWS::Region}:${AWS::AccountId}:CodebuildNotifications"
+          Id: "CodePipelineSuccessfulDeployNotifications"
+          InputTransformer:
+            InputTemplate: !Sub '"${ENV} <stage> stage has <state> for <pipeline> pipeline! Pipeline view: https://console.aws.amazon.com/codesuite/codepipeline/pipelines/${AWS::StackName}/view"'
+            InputPathsMap:
+              pipeline: "$.detail.pipeline"
+              stage: "$.detail.stage"
+              state: "$.detail.state"
