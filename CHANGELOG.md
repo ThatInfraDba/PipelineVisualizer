@@ -2,6 +2,14 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.3.3] - 2026-09-09
+
+### Security
+- Bumped `js-yaml` (4.1.1 → 4.3.2) — fixes quadratic-complexity DoS in merge-key/`!!omap` handling (GHSA-h67p-54hq-rp68, GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj, GHSA-2883-xcg3-v3hh)
+- Bumped `@typescript-eslint/eslint-plugin` and `@typescript-eslint/parser` (6.21.0 → 8.70.0) — resolves transitive ReDoS in `minimatch` (GHSA-3ppc-4f35-3m26, GHSA-7r86-cg39-jmmj, GHSA-23c5-xmqv-rm74)
+- Ran `npm audit fix` to update `brace-expansion` — resolves DoS advisories (GHSA-3jxr-9vmj-r5cp, GHSA-mh99-v99m-4gvg, GHSA-rgw5-rvv9-x895)
+- Bumped `@types/vscode` (1.85.0 → 1.136.0) devDependency to match current API surface (no functional change)
+
 ## [1.3.2] - 2026-06-03
 
 ### Fixed
