@@ -1,0 +1,74 @@
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  buildConfiguration: 'Release'
+
+stages:
+  - stage: Build
+    displayName: 'Build stage'
+    jobs:
+      - job: Build
+        displayName: 'Build job'
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              packageType: 'sdk'
+              version: '8.0.x'
+          - script: dotnet restore
+            displayName: 'Restore dependencies'
+          - script: dotnet build --configuration $(buildConfiguration)
+            displayName: 'Build project'
+          - script: dotnet test --configuration $(buildConfiguration) --no-build
+            displayName: 'Run unit tests'
+          - publish: '$(Build.ArtifactStagingDirectory)'
+            artifact: drop
+
+  - stage: DeployStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - deployment: DeployStaging
+        displayName: 'Deploy to staging environment'
+        environment: 'staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: echo "Deploying to staging..."
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'my-service-connection'
+                    appName: 'my-app-staging'
+                    package: '$(Pipeline.Workspace)/drop/**/*.zip'
+
+  - stage: DeployProduction
+    displayName: 'Deploy to Production'
+    dependsOn: DeployStaging
+    condition: succeeded()
+    jobs:
+      - deployment: DeployProduction
+        displayName: 'Deploy to production environment'
+        environment: 'production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: echo "Deploying to production..."
+                - task: AzureWebApp@1
+                  inputs:
+                    azureSubscription: 'my-service-connection'
+                    appName: 'my-app-production'
+                    package: '$(Pipeline.Workspace)/drop/**/*.zip'

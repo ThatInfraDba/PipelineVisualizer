@@ -1,0 +1,25 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "ThatInfraDba"
+    labels:
+      - "dependencies"
+    groups:
+      typescript-eslint:
+        patterns:
+          - "@typescript-eslint/*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    reviewers:
+      - "ThatInfraDba"
+    labels:
+      - "dependencies"
+      - "github-actions"

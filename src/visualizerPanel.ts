@@ -1,4 +1,5 @@
 ﻿import * as vscode from 'vscode';
+import * as yaml from 'js-yaml';
 
 interface ThemeDef {
     mermaidTheme: string;
@@ -219,7 +220,7 @@ export class PipelineVisualizerPanel {
 		PipelineVisualizerPanel.currentPanel = new PipelineVisualizerPanel(panel, extensionUri);		PipelineVisualizerPanel.currentPanel._documentUri = documentUri;		PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
 	}
 
-	public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, state: any) {
+	public static revive(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, _state: any) {
 		PipelineVisualizerPanel.currentPanel = new PipelineVisualizerPanel(panel, extensionUri);
 	}
 
@@ -244,7 +245,7 @@ export class PipelineVisualizerPanel {
 								const rawYaml = document.getText();
 								const yamlContent = rawYaml.replace(/![A-Za-z][A-Za-z0-9]*/g, '');
 								try {
-									const pipelineData = require('js-yaml').load(yamlContent);
+									yaml.load(yamlContent);
 									this._panel.webview.postMessage({
 										command: 'refreshData',
 										yamlContent: yamlContent
@@ -345,11 +346,10 @@ export class PipelineVisualizerPanel {
 			? '<span class="platform-badge bitbucket">🪣 Bitbucket Pipelines</span>'
 			: '<span class="platform-badge azure">☁️ Azure DevOps</span>';
 
-		const escapedLayoutPref = layoutPreference.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
-
 		// Resolve theme, applying platform-specific overrides for the dark theme
 		const themeDef = THEMES[colorTheme] || THEMES['dark'];
-		let { mermaidTheme, mermaidThemeVariables, edgeColor, palette, primary, secondary, accent, bodyGradientStart, bodyGradientEnd } = themeDef;
+		const { mermaidTheme, mermaidThemeVariables, edgeColor, palette } = themeDef;
+		let { primary, secondary, accent, bodyGradientStart, bodyGradientEnd } = themeDef;
 		if (themeDef.platformSpecific) {
 			if (platform === 'github') {
 				primary = '#2188ff'; secondary = '#6f42c1'; accent = '#2188ff';
