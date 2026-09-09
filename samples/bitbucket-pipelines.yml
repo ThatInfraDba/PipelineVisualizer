@@ -1,0 +1,184 @@
+# Sample bitbucket-pipelines.yml
+# This file is designed to test Pipeline Visualizer's Bitbucket support.
+#
+# It intentionally includes parallel steps, stages, deployments, manual
+# triggers, per-step image overrides, services, caches, and artifacts.
+#
+# OPTION B REFERENCE: The parallel blocks in the 'default' pipeline
+# (steps 2 and 4) are collapsed to single nodes under the current Option A
+# implementation. Option B would render each parallel branch as a separate
+# Mermaid subgraph node with fork/join edges. This file is the test case
+# for evaluating whether that added complexity is worth implementing.
+
+image: node:20
+
+definitions:
+  caches:
+    npm: ~/.npm
+    sonar: ~/.sonar/cache
+  services:
+    postgres:
+      image: postgres:15
+      variables:
+        POSTGRES_DB: testdb
+        POSTGRES_USER: testuser
+        POSTGRES_PASSWORD: testpass
+    redis:
+      image: redis:7
+
+pipelines:
+  default:
+    - step:
+        name: Install Dependencies
+        caches:
+          - npm
+        script:
+          - npm ci
+        artifacts:
+          paths:
+            - node_modules/
+
+    # OPTION B TEST: This parallel block has 3 branches.
+    # Option A (current): rendered as a single "⚡ 3 parallel steps" node.
+    # Option B (future):  rendered as a subgraph with 3 parallel nodes and
+    #                     fork/join connectors either side.
+    - parallel:
+        - step:
+            name: Unit Tests
+            image: node:20
+            services:
+              - postgres
+            caches:
+              - npm
+            script:
+              - npm run test:unit
+              - npm run test:coverage
+            artifacts:
+              paths:
+                - coverage/
+        - step:
+            name: Lint & Type Check
+            caches:
+              - npm
+            script:
+              - npm run lint
+              - npm run typecheck
+        - step:
+            name: Security Scan
+            image: node:20
+            caches:
+              - sonar
+            script:
+              - npm audit --audit-level=high
+              - npx sonarqube-scanner
+
+    - step:
+        name: Build
+        caches:
+          - npm
+        script:
+          - npm run build
+        artifacts:
+          paths:
+            - dist/
+
+    # OPTION B TEST: A second parallel block — two integration test variants.
+    - parallel:
+        - step:
+            name: Integration Tests (Postgres)
+            services:
+              - postgres
+              - redis
+            caches:
+              - npm
+            script:
+              - npm run test:integration
+        - step:
+            name: E2E Tests
+            image: cypress/browsers:node20-chrome113
+            caches:
+              - npm
+            script:
+              - npm run test:e2e
+
+    - step:
+        name: Deploy to Staging
+        deployment: staging
+        trigger: manual
+        script:
+          - pipe: atlassian/aws-s3-deploy:1.1.0
+          - echo "Deployed to staging"
+        after-script:
+          - echo "Staging deployment complete"
+
+    - step:
+        name: Deploy to Production
+        deployment: production
+        trigger: manual
+        size: 2x
+        script:
+          - pipe: atlassian/aws-s3-deploy:1.1.0
+          - echo "Deployed to production"
+          - curl -X POST "$SLACK_WEBHOOK" -d '{"text":"Production deploy complete"}'
+
+  branches:
+    main:
+      - step:
+          name: Fast-track Build
+          script:
+            - npm ci
+            - npm run build
+    'release/*':
+      - step:
+          name: Release Build
+          script:
+            - npm ci
+            - npm run build:release
+      - step:
+          name: Publish Artifacts
+          script:
+            - npm publish --tag next
+
+  pull-requests:
+    '**':
+      - step:
+          name: PR Validation
+          caches:
+            - npm
+          script:
+            - npm ci
+            - npm run lint
+            - npm run test:unit
+
+  tags:
+    'v*':
+      - step:
+          name: Tagged Release Build
+          script:
+            - npm ci
+            - npm run build:release
+      - step:
+          name: Publish to Registry
+          deployment: production
+          script:
+            - npm publish
+
+  custom:
+    nightly-regression:
+      - step:
+          name: Full Regression Suite
+          services:
+            - postgres
+            - redis
+          caches:
+            - npm
+          script:
+            - npm ci
+            - npm run test:all
+    manual-rollback:
+      - step:
+          name: Rollback Production
+          deployment: production
+          trigger: manual
+          script:
+            - ./scripts/rollback.sh "$ROLLBACK_VERSION"
