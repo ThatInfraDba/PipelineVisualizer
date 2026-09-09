@@ -154,7 +154,6 @@ Security:
 - **Bumped `js-yaml`** (4.1.1 → 4.3.2) — fixes quadratic-complexity DoS in merge-key/`!!omap` handling
 - **Bumped `@typescript-eslint/eslint-plugin` and `@typescript-eslint/parser`** (6.21.0 → 8.70.0) — resolves transitive ReDoS in `minimatch`
 - **Updated `brace-expansion`** via `npm audit fix` — resolves DoS advisories
-- **Bumped `@types/vscode`** devDependency (1.85.0 → 1.136.0) to match current API surface (no functional change)
 
 ### 1.3.2
 
