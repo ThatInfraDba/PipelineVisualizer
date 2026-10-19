@@ -2,7 +2,7 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
-## [1.5.0] - Unreleased
+## [1.5.0] - 2026-10-19
 
 Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualizer/issues/34)).
 
