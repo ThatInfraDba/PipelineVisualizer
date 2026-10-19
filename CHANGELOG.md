@@ -21,6 +21,17 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **Step and stage settings** — step `condition` (`changesets`), `runs-on`, `runtime.cloud.arch`, `max-time`, `oidc`; stage `deployment`, `trigger: manual`, `condition`; `parallel` `fail-fast`
   - Pipeline summary cards are clickable and switch the selector
   - New sample `samples/bitbucket-advanced.yml`
+- **GitLab CI/CD**
+  - **`extends:` resolution** — jobs inherit from hidden (`.template`) and regular jobs, including chains and multiple parents; hashes merge deeply and other values are replaced, matching GitLab. Inherited `stage`, `image`, `script`, `rules` etc. now show
+  - **`!reference [job, key]`** — resolved in `script`, `before_script`, `after_script` and `rules` (previously shown as `.job,script` after the tag was stripped)
+  - **Downstream pipelines** (`trigger:`) — child pipeline `include`, multi-project `project` / `branch`, `strategy: depend` and `forward`, instead of an empty job
+  - **`parallel` / `parallel:matrix`** — job count and the matrix variables
+  - **`include:`** — info card plus a Configuration section listing local / project / remote / template / `component:` sources
+  - **Rules in detail** — job `rules` and `workflow:rules` list each rule's `if` / `changes` / `exists` and its outcome (`when`, `allow_failure`, `variables`) instead of a count; Workflow card shows the rule count and `auto_cancel`
+  - **Job settings** — `services`, `cache`, `artifacts` (paths, reports, expiry), `retry`, `timeout`, `resource_group`, `release`, `coverage`, `environment:action`, `id_tokens`, `secrets`, and job-level `inputs` (GitLab 18.10)
+  - **`spec:inputs`** — `regex` and conditional `rules` (GitLab 18.7) with their `options` / `default`; array defaults (GitLab 19.0) shown as JSON
+  - Job names and script lines are now HTML-escaped
+  - New sample `samples/advanced.gitlab-ci.yml`
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19

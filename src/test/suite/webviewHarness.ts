@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
 import * as yaml from 'js-yaml';
+import { stripCustomTags } from '../../yamlParser';
 
 const extensionRoot = path.resolve(__dirname, '../../../');
 const samplesDir = path.join(extensionRoot, 'samples');
@@ -71,7 +72,8 @@ export function renderInWebview(platform: string, yamlContent: string, followUp?
 	vm.createContext(context);
 	vm.runInContext(webviewScript, context);
 	assert.ok(messageHandler, 'webview.js did not register a message handler');
-	messageHandler!({ data: { command: 'refreshData', yamlContent } });
+	// The extension strips custom tags (e.g. !reference, !Ref) before posting the YAML
+	messageHandler!({ data: { command: 'refreshData', yamlContent: stripCustomTags(yamlContent) } });
 	if (followUp) {
 		vm.runInContext(followUp, context);
 	}

@@ -11,6 +11,84 @@ function assertIncludesAll(html: string, expected: string[]) {
 	}
 }
 
+suite('GitLab CI/CD features', () => {
+	const sample = readSample('advanced.gitlab-ci.yml');
+
+	test('resolves extends: and !reference', () => {
+		const html = renderInWebview('gitlab', sample);
+		assertRendered(html);
+		// build inherits image/tags/cache/retry from .node-job and the script from .setup
+		assertIncludesAll(html, [
+			'🧬 Extends:</strong> <code>.node-job</code>',
+			'<code>node:22</code>',
+			'key files: package-lock.json node_modules/ (pull-push)',
+			'2 on runner_system_failure',
+			'▶️ npm ci',
+			'▶️ npm run build'
+		]);
+		assert.ok(!html.includes('.setup,script'), 'Expected !reference to be resolved');
+		// .node-job is hidden and must not render as a job
+		assert.ok(!html.includes('<h3>.node-job</h3>'));
+	});
+
+	test('shows parallel:matrix, trigger jobs and job settings', () => {
+		const html = renderInWebview('gitlab', sample);
+		assertIncludesAll(html, [
+			'🔀 Parallel:</strong> 4 jobs',
+			'NODE_VERSION: 20 | 22 × SUITE: unit | integration',
+			'postgres:16 (db)',
+			'reports: junit',
+			'30 minutes',
+			'🔗 Downstream Pipeline',
+			'Child pipeline:</strong> 📄 docs/.gitlab-ci.yml',
+			'(waits for the downstream pipeline)',
+			'<code>platform/infrastructure</code> @ main',
+			'pipeline_variables',
+			'<code>production</code>',
+			'🎬 Environment action:</strong> start',
+			'AWS_ID_TOKEN',
+			'DATABASE_PASSWORD',
+			'<code>version</code> = latest',
+			'<code>$CI_COMMIT_TAG</code>'
+		]);
+	});
+
+	test('shows includes, workflow and rule details', () => {
+		const html = renderInWebview('gitlab', sample);
+		assertIncludesAll(html, [
+			'4 source(s)',
+			'🧩 component <code>$CI_SERVER_FQDN/components/sast/sast@2.1.0</code>',
+			'📦 project <code>platform/ci-templates</code> @ v3.2.0: <code>/templates/security.yml</code>',
+			'📋 template <code>Jobs/Code-Quality.gitlab-ci.yml</code>',
+			'2 rule(s), on new commit: interruptible',
+			'if <code>$CI_PIPELINE_SOURCE == "merge_request_event"</code> and changes <code>src/**/*</code>',
+			'always → when: never'
+		]);
+	});
+
+	test('shows conditional spec:inputs rules', () => {
+		const html = renderInWebview('gitlab', [
+			'spec:',
+			'  inputs:',
+			'    env:',
+			'      options: [dev, prod]',
+			'    size:',
+			'      type: array',
+			'      default: [small]',
+			'      rules:',
+			'        - if: $[[ inputs.env ]] == "prod"',
+			'          options: [large, xlarge]',
+			'          default: large',
+			'        - default: small',
+			'---',
+			'job:',
+			'  script: [echo]'
+		].join('\n'));
+		assertRendered(html);
+		assertIncludesAll(html, ['Conditional values', 'options large, xlarge, default <code>large</code>', 'otherwise → default <code>small</code>', '<code>["small"]</code>']);
+	});
+});
+
 suite('Bitbucket Pipelines features', () => {
 	const sample = readSample('bitbucket-advanced.yml');
 

@@ -467,12 +467,208 @@
             }
         }
 
+        function isPlainObject(value) {
+            return value !== null && typeof value === 'object' && !Array.isArray(value);
+        }
+
+        // Applies `extends:` (hashes merge deeply, other values are replaced, as in GitLab) and
+        // inlines `!reference [job, key]` entries. The tag is stripped before parsing, so a
+        // reference arrives as an array of strings whose first item names a top-level key.
+        function resolveGitLabConfig(data) {
+            const deepMerge = (base, override) => {
+                if (!isPlainObject(base) || !isPlainObject(override)) { return override; }
+                const out = Object.assign({}, base);
+                Object.keys(override).forEach(k => { out[k] = k in base ? deepMerge(base[k], override[k]) : override[k]; });
+                return out;
+            };
+            const resolved = {};
+            const resolving = new Set();
+            const resolveJob = (key) => {
+                if (resolved[key]) { return resolved[key]; }
+                const job = data[key];
+                if (resolving.has(key)) { return job; }
+                resolving.add(key);
+                let merged = {};
+                asList(job.extends).forEach(parent => {
+                    if (isPlainObject(data[parent])) { merged = deepMerge(merged, resolveJob(parent)); }
+                });
+                merged = deepMerge(merged, job);
+                resolving.delete(key);
+                resolved[key] = merged;
+                return merged;
+            };
+            const result = {};
+            Object.keys(data).forEach(key => { result[key] = isPlainObject(data[key]) ? resolveJob(key) : data[key]; });
+
+            const isReference = (entry) => Array.isArray(entry) && entry.length >= 2 &&
+                entry.every(p => typeof p === 'string') && isPlainObject(result[entry[0]]);
+            const lookup = (path) => path.reduce((value, part) => (value && typeof value === 'object') ? value[part] : undefined, result);
+            const expand = (value, depth) => {
+                if (depth > 10) { return value; }
+                if (isReference(value)) { return expand(lookup(value), depth + 1); }
+                if (!Array.isArray(value)) { return value; }
+                const out = [];
+                value.forEach(item => {
+                    if (isReference(item)) {
+                        asList(expand(lookup(item), depth + 1)).forEach(x => out.push(x));
+                    } else {
+                        out.push(item);
+                    }
+                });
+                return out;
+            };
+            Object.keys(result).forEach(key => {
+                const job = result[key];
+                if (!isPlainObject(job)) { return; }
+                ['script', 'before_script', 'after_script', 'rules'].forEach(k => {
+                    if (job[k] !== undefined) { job[k] = expand(job[k], 0); }
+                });
+            });
+            return result;
+        }
+
+        function describeGitLabRule(rule) {
+            if (!isPlainObject(rule)) { return String(rule); }
+            const parts = [];
+            if (rule.if) { parts.push(`if <code>${escapeHtml(String(rule.if))}</code>`); }
+            if (rule.changes) {
+                const paths = isPlainObject(rule.changes) ? asList(rule.changes.paths) : asList(rule.changes);
+                parts.push(`changes ${paths.map(p => `<code>${escapeHtml(String(p))}</code>`).join(', ')}`);
+            }
+            if (rule.exists) {
+                const paths = isPlainObject(rule.exists) ? asList(rule.exists.paths) : asList(rule.exists);
+                parts.push(`exists ${paths.map(p => `<code>${escapeHtml(String(p))}</code>`).join(', ')}`);
+            }
+            const outcome = [];
+            if (rule.when) { outcome.push(`when: ${escapeHtml(String(rule.when))}`); }
+            if (rule.allow_failure !== undefined) { outcome.push(`allow_failure: ${escapeHtml(String(rule.allow_failure))}`); }
+            if (rule.variables) { outcome.push(`sets ${Object.keys(rule.variables).map(v => escapeHtml(v)).join(', ')}`); }
+            if (rule.needs) { outcome.push('overrides needs'); }
+            return (parts.length ? parts.join(' and ') : 'always') + (outcome.length ? ` → ${outcome.join(', ')}` : '');
+        }
+
+        function renderGitLabRules(rules, title) {
+            const list = asList(rules);
+            if (!list.length) { return ''; }
+            let html = `<p><strong>${title}:</strong></p><ul class="rules">`;
+            list.forEach(rule => { html += `<li>${describeGitLabRule(rule)}</li>`; });
+            return html + '</ul>';
+        }
+
+        function countParallelJobs(parallel) {
+            if (typeof parallel === 'number') { return parallel; }
+            if (isPlainObject(parallel) && Array.isArray(parallel.matrix)) {
+                return parallel.matrix.reduce((total, entry) => total + Object.values(entry || {})
+                    .reduce((product, values) => product * asList(values).length, 1), 0);
+            }
+            return 0;
+        }
+
+        function describeGitLabInclude(entry) {
+            if (typeof entry === 'string') { return `📄 ${escapeHtml(entry)}`; }
+            if (!isPlainObject(entry)) { return escapeHtml(JSON.stringify(entry)); }
+            if (entry.component) { return `🧩 component <code>${escapeHtml(String(entry.component))}</code>`; }
+            if (entry.local) { return `📄 local <code>${escapeHtml(String(entry.local))}</code>`; }
+            if (entry.project) {
+                const files = asList(entry.file).map(f => `<code>${escapeHtml(String(f))}</code>`).join(', ');
+                return `📦 project <code>${escapeHtml(String(entry.project))}</code>${entry.ref ? ` @ ${escapeHtml(String(entry.ref))}` : ''}${files ? `: ${files}` : ''}`;
+            }
+            if (entry.remote) { return `🌐 remote <code>${escapeHtml(String(entry.remote))}</code>`; }
+            if (entry.template) { return `📋 template <code>${escapeHtml(String(entry.template))}</code>`; }
+            return escapeHtml(JSON.stringify(entry));
+        }
+
+        // Settings shown on every job card, below the image / tags / needs lines
+        function renderGitLabJobSettings(job) {
+            let html = '';
+            if (job.extends !== undefined) {
+                html += `<p><strong>🧬 Extends:</strong> ${asList(job.extends).map(e => `<code>${escapeHtml(String(e))}</code>`).join(', ')}</p>`;
+            }
+            const parallelCount = countParallelJobs(job.parallel);
+            if (parallelCount) {
+                html += `<p><strong>🔀 Parallel:</strong> ${parallelCount} jobs</p>`;
+                if (isPlainObject(job.parallel) && Array.isArray(job.parallel.matrix)) {
+                    html += '<ul class="rules">';
+                    job.parallel.matrix.forEach(entry => {
+                        html += `<li>${Object.entries(entry || {}).map(([k, v]) => `${escapeHtml(k)}: ${asList(v).map(x => escapeHtml(String(x))).join(' | ')}`).join(' × ')}</li>`;
+                    });
+                    html += '</ul>';
+                }
+            }
+            if (job.inputs && isPlainObject(job.inputs)) {
+                const inputs = Object.entries(job.inputs).map(([name, def]) => {
+                    const value = isPlainObject(def) ? def.default : def;
+                    return `<code>${escapeHtml(name)}</code>${value !== undefined ? ` = ${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : String(value))}` : ''}`;
+                });
+                html += `<p><strong>📥 Inputs:</strong> ${inputs.join(', ')}</p>`;
+            }
+            if (isPlainObject(job.environment) && job.environment.action) {
+                html += `<p><strong>🎬 Environment action:</strong> ${escapeHtml(String(job.environment.action))}</p>`;
+            }
+            if (job.services) {
+                const services = asList(job.services).map(s => escapeHtml(String(isPlainObject(s) ? (s.alias ? `${s.name} (${s.alias})` : s.name) : s)));
+                html += `<p><strong>🛠️ Services:</strong> ${services.join(', ')}</p>`;
+            }
+            if (job.cache) {
+                const caches = asList(job.cache).map(c => {
+                    if (!isPlainObject(c)) { return escapeHtml(String(c)); }
+                    const key = isPlainObject(c.key) ? `files: ${asList(c.key.files).join(', ')}` : c.key;
+                    return escapeHtml([key ? `key ${key}` : '', c.paths ? asList(c.paths).join(', ') : '', c.policy ? `(${c.policy})` : ''].filter(Boolean).join(' '));
+                });
+                html += `<p><strong>💾 Cache:</strong> ${caches.join('; ')}</p>`;
+            }
+            if (isPlainObject(job.artifacts)) {
+                const parts = [];
+                if (job.artifacts.paths) { parts.push(asList(job.artifacts.paths).map(p => escapeHtml(String(p))).join(', ')); }
+                if (job.artifacts.reports) { parts.push(`reports: ${Object.keys(job.artifacts.reports).map(r => escapeHtml(r)).join(', ')}`); }
+                if (job.artifacts.expire_in) { parts.push(`expires in ${escapeHtml(String(job.artifacts.expire_in))}`); }
+                if (job.artifacts.when) { parts.push(`when ${escapeHtml(String(job.artifacts.when))}`); }
+                html += `<p><strong>📦 Artifacts:</strong> ${parts.join('; ')}</p>`;
+            }
+            if (job.retry !== undefined) {
+                const retry = isPlainObject(job.retry)
+                    ? `${job.retry.max || 0}${job.retry.when ? ` on ${asList(job.retry.when).join(', ')}` : ''}`
+                    : String(job.retry);
+                html += `<p><strong>🔁 Retry:</strong> ${escapeHtml(retry)}</p>`;
+            }
+            if (job.timeout) { html += `<p><strong>⏱️ Timeout:</strong> ${escapeHtml(String(job.timeout))}</p>`; }
+            if (job.resource_group) { html += `<p><strong>🔒 Resource group:</strong> <code>${escapeHtml(String(job.resource_group))}</code></p>`; }
+            if (isPlainObject(job.release)) { html += `<p><strong>🏷️ Release:</strong> <code>${escapeHtml(String(job.release.tag_name || job.release.name || ''))}</code></p>`; }
+            if (job.coverage) { html += `<p><strong>📈 Coverage regex:</strong> <code>${escapeHtml(String(job.coverage))}</code></p>`; }
+            if (isPlainObject(job.id_tokens)) { html += `<p><strong>🪪 ID tokens:</strong> ${Object.keys(job.id_tokens).map(t => escapeHtml(t)).join(', ')}</p>`; }
+            if (isPlainObject(job.secrets)) { html += `<p><strong>🔑 Secrets:</strong> ${Object.keys(job.secrets).map(s => escapeHtml(s)).join(', ')}</p>`; }
+            html += renderGitLabRules(job.rules, '📋 Rules');
+            return html;
+        }
+
+        function renderGitLabTrigger(trigger) {
+            let html = '<div class="approval-badge">🔗 Downstream Pipeline</div>';
+            if (typeof trigger === 'string') {
+                return html + `<p><strong>Project:</strong> <code>${escapeHtml(trigger)}</code></p>`;
+            }
+            if (!isPlainObject(trigger)) { return html; }
+            if (trigger.project) {
+                html += `<p><strong>Project:</strong> <code>${escapeHtml(String(trigger.project))}</code>${trigger.branch ? ` @ ${escapeHtml(String(trigger.branch))}` : ''}</p>`;
+            }
+            if (trigger.include) {
+                html += `<p><strong>Child pipeline:</strong> ${asList(trigger.include).map(describeGitLabInclude).join(', ')}</p>`;
+            }
+            if (trigger.strategy) {
+                html += `<p><strong>Strategy:</strong> ${escapeHtml(String(trigger.strategy))}${trigger.strategy === 'depend' ? ' (waits for the downstream pipeline)' : ''}</p>`;
+            }
+            if (trigger.forward) {
+                html += `<p><strong>Forward:</strong> ${Object.entries(trigger.forward).filter(([, v]) => v).map(([k]) => escapeHtml(k)).join(', ') || 'none'}</p>`;
+            }
+            return html;
+        }
+
         function renderGitLab(data) {
             try {
                 if (!data) {
                     showError('No Data', 'Pipeline data is empty or undefined.', '<strong>Tip:</strong> Make sure your YAML file contains valid GitLab CI configuration.');
                     return;
                 }
+                data = resolveGitLabConfig(data);
 
                 const RESERVED = new Set(['stages', 'variables', 'default', 'include', 'workflow', 'spec', 'image', 'services', 'cache', 'before_script', 'after_script']);
                 const jobEntries = Object.entries(data).filter(([key, value]) =>
@@ -509,7 +705,15 @@
                 const specInputs = (pipelineSpec && pipelineSpec.inputs && typeof pipelineSpec.inputs === 'object') ? pipelineSpec.inputs : null;
                 if (specInputs) html += `<div class="info-card"><h3>📥 Inputs</h3><p>${Object.keys(specInputs).length} declared</p></div>`;
                 if (data.variables) html += `<div class="info-card"><h3>🔧 Variables</h3><p>${Object.keys(data.variables).length} defined</p></div>`;
-                if (data.workflow) html += '<div class="info-card"><h3>🔀 Workflow</h3><p>Configured</p></div>';
+                if (data.workflow) {
+                    const workflowParts = [];
+                    if (data.workflow.rules) { workflowParts.push(`${asList(data.workflow.rules).length} rule(s)`); }
+                    if (isPlainObject(data.workflow.auto_cancel)) {
+                        Object.entries(data.workflow.auto_cancel).forEach(([k, v]) => workflowParts.push(`${k.replace(/_/g, ' ')}: ${v}`));
+                    }
+                    html += `<div class="info-card"><h3>🔀 Workflow</h3><p>${escapeHtml(workflowParts.join(', ') || 'Configured')}</p></div>`;
+                }
+                if (data.include) html += `<div class="info-card"><h3>📎 Includes</h3><p>${asList(data.include).length} source(s)</p></div>`;
                 if (data.default && data.default.image) {
                     const imgName = typeof data.default.image === 'string' ? data.default.image : data.default.image.name;
                     html += `<div class="info-card"><h3>🐳 Default Image</h3><p>${imgName}</p></div>`;
@@ -556,6 +760,19 @@
                     })), chainEdges(stageIds));
                 }
 
+                if (data.include || (data.workflow && data.workflow.rules)) {
+                    html += '<div class="stage"><h2>📎 Configuration</h2><div class="job">';
+                    if (data.include) {
+                        html += '<p><strong>Includes:</strong></p><ul class="rules">';
+                        asList(data.include).forEach(entry => { html += `<li>${describeGitLabInclude(entry)}</li>`; });
+                        html += '</ul>';
+                    }
+                    if (data.workflow && data.workflow.rules) {
+                        html += renderGitLabRules(data.workflow.rules, 'Workflow rules');
+                    }
+                    html += '</div></div>';
+                }
+
                 if (specInputs) {
                     const inputsColor = stageColors[(activeStages.length) % stageColors.length];
                     html += `<div class="stage" style="border-color: ${inputsColor}; background: linear-gradient(135deg, ${inputsColor}33 0%, ${inputsColor}14 100%);">`;
@@ -573,8 +790,22 @@
                         if (Array.isArray(def.options)) {
                             html += `<p><strong>Options:</strong> ${def.options.map(o => escapeHtml(String(o))).join(', ')}</p>`;
                         }
+                        if (def.regex) {
+                            html += `<p><strong>Regex:</strong> <code>${escapeHtml(String(def.regex))}</code></p>`;
+                        }
                         if (def.description) {
                             html += `<p>${escapeHtml(String(def.description))}</p>`;
+                        }
+                        if (Array.isArray(def.rules)) {
+                            html += '<p><strong>Conditional values:</strong></p><ul class="rules">';
+                            def.rules.forEach(rule => {
+                                const r = isPlainObject(rule) ? rule : {};
+                                const result = [];
+                                if (Array.isArray(r.options)) { result.push(`options ${r.options.map(o => escapeHtml(String(o))).join(', ')}`); }
+                                if (r.default !== undefined) { result.push(`default <code>${escapeHtml(String(r.default))}</code>`); }
+                                html += `<li>${r.if ? `if <code>${escapeHtml(String(r.if))}</code>` : 'otherwise'} → ${result.join(', ') || 'no change'}</li>`;
+                            });
+                            html += '</ul>';
                         }
                         html += '</div>';
                     });
@@ -593,14 +824,18 @@
                         const isManual = job.when === 'manual';
                         const hasEnv = !!job.environment;
 
-                        if (isManual && !hasEnv) {
+                        if (isManual && !hasEnv && !job.trigger) {
                             html += '<div class="approval">';
                             html += '<h4>⏸️ Manual Job</h4>';
-                            html += `<p><strong>Job:</strong> ${key}</p>`;
-                            if (job.rules) html += `<p><strong>Rules:</strong> ${job.rules.length} condition(s)</p>`;
+                            html += `<p><strong>Job:</strong> ${escapeHtml(key)}</p>`;
+                            html += renderGitLabRules(job.rules, 'Rules');
                             html += '</div>';
                         } else {
-                            html += `<div class="job"><h3>${key}</h3>`;
+                            html += `<div class="job"><h3>${escapeHtml(key)}</h3>`;
+
+                            if (job.trigger) {
+                                html += renderGitLabTrigger(job.trigger);
+                            }
 
                             if (hasEnv) {
                                 const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
@@ -628,9 +863,7 @@
                                 }
                             }
 
-                            if (job.rules && job.rules.length > 0) {
-                                html += `<p><strong>📋 Rules:</strong> ${job.rules.length} condition(s)</p>`;
-                            }
+                            html += renderGitLabJobSettings(job);
 
                             if (job.allow_failure === true) {
                                 html += '<p class="approval-info">ℹ️ Allowed to fail</p>';
@@ -658,7 +891,7 @@
                                 steps.forEach(({ label, script, phase }) => {
                                     const sid = `step_${stepCounter++}`;
                                     allSteps[sid] = { script, phase, displayName: label };
-                                    html += `<li data-step="${sid}" style="cursor:pointer;">${label}</li>`;
+                                    html += `<li data-step="${sid}" style="cursor:pointer;">${escapeHtml(label)}</li>`;
                                 });
                                 html += '</ul>';
                             }

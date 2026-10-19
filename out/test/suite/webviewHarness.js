@@ -41,6 +41,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const vm = __importStar(require("vm"));
 const yaml = __importStar(require("js-yaml"));
+const yamlParser_1 = require("../../yamlParser");
 const extensionRoot = path.resolve(__dirname, '../../../');
 const samplesDir = path.join(extensionRoot, 'samples');
 const webviewScript = fs.readFileSync(path.join(extensionRoot, 'media', 'webview.js'), 'utf8');
@@ -107,7 +108,8 @@ function renderInWebview(platform, yamlContent, followUp) {
     vm.createContext(context);
     vm.runInContext(webviewScript, context);
     assert.ok(messageHandler, 'webview.js did not register a message handler');
-    messageHandler({ data: { command: 'refreshData', yamlContent } });
+    // The extension strips custom tags (e.g. !reference, !Ref) before posting the YAML
+    messageHandler({ data: { command: 'refreshData', yamlContent: (0, yamlParser_1.stripCustomTags)(yamlContent) } });
     if (followUp) {
         vm.runInContext(followUp, context);
     }
