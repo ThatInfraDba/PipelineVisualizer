@@ -23,6 +23,7 @@ const SAMPLES: SampleCase[] = [
 	{ file: 'azure-pipeline.yaml', expectedBadge: 'Azure DevOps' },
 	{ file: 'azure-jobs-only.yaml', expectedBadge: 'Azure DevOps' },
 	{ file: 'azure-steps-only.yaml', expectedBadge: 'Azure DevOps' },
+	{ file: 'azure-advanced.yaml', expectedBadge: 'Azure DevOps' },
 	{ file: 'github-workflow.yaml', expectedBadge: 'GitHub Actions' },
 	{ file: 'github-advanced.yaml', expectedBadge: 'GitHub Actions' },
 	{ file: 'gitlab-pipeline.yaml', expectedBadge: 'GitLab CI' },

@@ -268,6 +268,154 @@
             initAndRender();
         }
 
+        function azureStepLabel(step) {
+            if (step.displayName) { return step.displayName; }
+            if (step.template) { return `📄 template: ${step.template}`; }
+            const script = step.script || step.bash || step.pwsh || step.powershell;
+            if (script) { return String(script).substring(0, 50); }
+            if (step.task) { return step.task; }
+            for (const shortcut of ['checkout', 'download', 'downloadBuild', 'publish', 'getPackage', 'reviewApp']) {
+                if (step[shortcut] !== undefined) { return `${shortcut}: ${step[shortcut]}`; }
+            }
+            return 'Step';
+        }
+
+        function renderAzureSteps(steps, icon) {
+            if (!Array.isArray(steps) || !steps.length) { return ''; }
+            let html = '<ul class="steps">';
+            steps.forEach(step => {
+                const s = step || {};
+                const sid = `step_${stepCounter++}`;
+                allSteps[sid] = s;
+                const condition = s.condition ? ` <span style="opacity: 0.7; font-size: 11px;">if ${escapeHtml(String(s.condition))}</span>` : '';
+                html += `<li data-step="${sid}" style="cursor:pointer;">${icon || '▶️'} ${escapeHtml(String(azureStepLabel(s)))}${condition}</li>`;
+            });
+            return html + '</ul>';
+        }
+
+        function renderAzureTemplateRef(item) {
+            if (!item.template) { return ''; }
+            let html = `<p><strong>📄 Template:</strong> <code>${escapeHtml(String(item.template))}</code></p>`;
+            if (isPlainObject(item.parameters)) {
+                html += `<p><strong>Parameters:</strong> ${Object.entries(item.parameters).map(([k, v]) => `<code>${escapeHtml(k)}</code> = ${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}`).join(', ')}</p>`;
+            }
+            return html + '<p class="approval-info">ℹ️ Template contents are defined in another file and are not shown here</p>';
+        }
+
+        function renderAzurePipelineSettings(data) {
+            let html = '';
+            if (isPlainObject(data.extends) && data.extends.template) {
+                html += `<div class="job"><h3>🧬 Extends</h3>${renderAzureTemplateRef(data.extends)}</div>`;
+            }
+            if (Array.isArray(data.parameters) && data.parameters.length) {
+                html += '<div class="job"><h3>⚙️ Parameters</h3><ul class="rules">';
+                data.parameters.forEach(p => {
+                    const param = p || {};
+                    const parts = [];
+                    if (param.type) { parts.push(escapeHtml(String(param.type))); }
+                    if (param.default !== undefined) { parts.push(`default <code>${escapeHtml(typeof param.default === 'object' ? JSON.stringify(param.default) : String(param.default))}</code>`); }
+                    if (Array.isArray(param.values)) { parts.push(`values ${param.values.map(v => escapeHtml(String(v))).join(', ')}`); }
+                    html += `<li><code>${escapeHtml(String(param.name))}</code>${param.displayName ? ` (${escapeHtml(String(param.displayName))})` : ''}${parts.length ? ` — ${parts.join(', ')}` : ''}</li>`;
+                });
+                html += '</ul></div>';
+            }
+            if (isPlainObject(data.resources)) {
+                html += '<div class="job"><h3>📚 Resources</h3><ul class="rules">';
+                Object.entries(data.resources).forEach(([kind, entries]) => {
+                    asList(entries).forEach(entry => {
+                        const e = entry || {};
+                        const alias = e.repository || e.pipeline || e.container || e.build || e.package || e.webhook || '';
+                        const source = e.name || e.source || e.image || e.project || '';
+                        html += `<li>${escapeHtml(kind)}: <code>${escapeHtml(String(alias))}</code>${source ? ` → ${escapeHtml(String(source))}` : ''}${e.ref ? ` @ ${escapeHtml(String(e.ref))}` : ''}${e.trigger ? ' (triggers this pipeline)' : ''}</li>`;
+                    });
+                });
+                html += '</ul></div>';
+            }
+            return html ? `<div class="stage"><h2>⚙️ Pipeline Configuration</h2>${html}</div>` : '';
+        }
+
+        function renderAzureStageSettings(stage) {
+            let html = '';
+            if (stage.trigger === 'manual') {
+                html += '<div class="approval-badge" style="background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%);">⏸️ Manual Stage</div>';
+            }
+            if (stage.dependsOn !== undefined) {
+                const deps = asList(stage.dependsOn);
+                html += `<p><strong>⛓️ Depends on:</strong> ${deps.length ? deps.map(d => `<code>${escapeHtml(String(d))}</code>`).join(', ') : '<em>nothing (runs immediately)</em>'}</p>`;
+            }
+            if (stage.condition) { html += `<p><strong>🔀 Condition:</strong> <code>${escapeHtml(String(stage.condition))}</code></p>`; }
+            if (stage.isSkippable === false) { html += '<p class="approval-info">🔒 Cannot be skipped at queue time</p>'; }
+            if (stage.lockBehavior) { html += `<p><strong>🔒 Lock behavior:</strong> ${escapeHtml(String(stage.lockBehavior))}</p>`; }
+            if (stage.pool) {
+                const poolName = typeof stage.pool === 'string' ? stage.pool : (stage.pool.vmImage || stage.pool.name);
+                if (poolName) { html += `<p><strong>🖥️ Pool:</strong> ${escapeHtml(String(poolName))}</p>`; }
+            }
+            return html;
+        }
+
+        function renderAzureJobSettings(job) {
+            let html = '';
+            if (job.dependsOn !== undefined) {
+                const deps = asList(job.dependsOn);
+                html += `<p><strong>⛓️ Depends on:</strong> ${deps.length ? deps.map(d => `<code>${escapeHtml(String(d))}</code>`).join(', ') : '<em>nothing</em>'}</p>`;
+            }
+            if (job.condition) { html += `<p><strong>🔀 Condition:</strong> <code>${escapeHtml(String(job.condition))}</code></p>`; }
+            if (job.pool && job.pool !== 'server') {
+                const poolName = typeof job.pool === 'string' ? job.pool : (job.pool.vmImage || job.pool.name);
+                if (poolName) { html += `<p><strong>🖥️ Pool:</strong> ${escapeHtml(String(poolName))}</p>`; }
+            }
+            if (job.container) {
+                const image = isPlainObject(job.container) ? (job.container.image || job.container.alias) : job.container;
+                html += `<p><strong>🐳 Container:</strong> <code>${escapeHtml(String(image))}</code></p>`;
+            }
+            if (isPlainObject(job.services)) {
+                html += `<p><strong>🛠️ Services:</strong> ${Object.entries(job.services).map(([name, svc]) => `<code>${escapeHtml(name)}</code>${typeof svc === 'string' ? ` (${escapeHtml(svc)})` : ''}`).join(', ')}</p>`;
+            }
+            // Regular jobs: matrix / parallel strategy (deployment strategies are rendered separately)
+            const strategy = job.strategy;
+            if (isPlainObject(strategy) && !job.deployment) {
+                if (isPlainObject(strategy.matrix)) {
+                    html += `<p><strong>🔢 Matrix:</strong> ${Object.keys(strategy.matrix).map(k => `<code>${escapeHtml(k)}</code>`).join(', ')} (${Object.keys(strategy.matrix).length} job(s))</p>`;
+                } else if (strategy.matrix !== undefined) {
+                    html += `<p><strong>🔢 Matrix:</strong> <code>${escapeHtml(String(strategy.matrix))}</code></p>`;
+                }
+                if (strategy.parallel !== undefined) { html += `<p><strong>🔀 Parallel:</strong> ${escapeHtml(String(strategy.parallel))} agents</p>`; }
+                if (strategy.maxParallel !== undefined) { html += `<p><strong>Max parallel:</strong> ${escapeHtml(String(strategy.maxParallel))}</p>`; }
+            }
+            if (job.timeoutInMinutes !== undefined) { html += `<p><strong>⏱️ Timeout:</strong> ${escapeHtml(String(job.timeoutInMinutes))} min</p>`; }
+            if (job.continueOnError) { html += '<p class="approval-info">ℹ️ Continue on error</p>'; }
+            return html;
+        }
+
+        // Deployment jobs keep their steps in lifecycle hooks under strategy.runOnce / rolling / canary
+        function renderAzureDeploymentStrategy(job) {
+            if (!job.deployment || !isPlainObject(job.strategy)) { return ''; }
+            const HOOKS = [['preDeploy', '🔧'], ['deploy', '🚀'], ['routeTraffic', '🔀'], ['postRouteTraffic', '✅']];
+            let html = '';
+            ['runOnce', 'rolling', 'canary'].forEach(kind => {
+                const strategy = job.strategy[kind];
+                if (!isPlainObject(strategy)) { return; }
+                html += `<p><strong>📋 Strategy:</strong> ${kind}`;
+                if (kind === 'rolling' && strategy.maxParallel !== undefined) { html += ` (max parallel ${escapeHtml(String(strategy.maxParallel))})`; }
+                if (kind === 'canary' && strategy.increments) { html += ` (increments ${escapeHtml(asList(strategy.increments).join('%, '))}%)`; }
+                html += '</p>';
+                HOOKS.forEach(([hook, icon]) => {
+                    const steps = strategy[hook] && strategy[hook].steps;
+                    if (Array.isArray(steps) && steps.length) {
+                        html += `<h4>${icon} ${hook}</h4>${renderAzureSteps(steps)}`;
+                    }
+                });
+                const on = strategy.on || {};
+                [['success', '🎉'], ['failure', '🧯']].forEach(([outcome, icon]) => {
+                    const steps = on[outcome] && on[outcome].steps;
+                    if (Array.isArray(steps) && steps.length) {
+                        html += `<h4>${icon} on ${outcome}</h4>${renderAzureSteps(steps)}`;
+                    }
+                });
+            });
+            return html;
+        }
+
         function renderAzure(data) {
             try {
                 if (!data) {
@@ -290,7 +438,14 @@
                 html += '<div class="info-card"><h3>🖥️ Pool</h3><p>' + escapeHtml(String(poolName)) + '</p></div>';
             }
             if (data.stages) html += `<div class="info-card"><h3>📊 Stages</h3><p>${data.stages.length}</p></div>`;
+            if (data.parameters) html += `<div class="info-card"><h3>⚙️ Parameters</h3><p>${asList(data.parameters).length} defined</p></div>`;
+            if (data.variables) {
+                const variableCount = Array.isArray(data.variables) ? data.variables.length : Object.keys(data.variables).length;
+                html += `<div class="info-card"><h3>🔧 Variables</h3><p>${variableCount} entr${variableCount === 1 ? 'y' : 'ies'}</p></div>`;
+            }
+            if (data.resources) html += `<div class="info-card"><h3>📚 Resources</h3><p>${escapeHtml(Object.keys(data.resources).join(', '))}</p></div>`;
             html += '</div>';
+            html += renderAzurePipelineSettings(data);
 
             const stageColors = themePalette;
             const stages = Array.isArray(data.stages) ? data.stages : [];
@@ -317,10 +472,16 @@
             if (data.stages) {
                 data.stages.forEach((stage, idx) => {
                     const color = stageColors[idx % stageColors.length];
-                    html += `<div id="S${idx}" class="stage" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="background: ${color}; color: white;">🔨 ${stage.displayName || stage.stage}</h2>`;
+                    html += `<div id="S${idx}" class="stage" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="background: ${color}; color: white;">🔨 ${escapeHtml(String(stage.displayName || stage.stage || (stage.template ? 'Template' : 'Stage')))}</h2>`;
+                    html += renderAzureTemplateRef(stage);
+                    html += renderAzureStageSettings(stage);
                     if (stage.jobs) {
                         stage.jobs.forEach((job, jidx) => {
                             try {
+                                if (job.template) {
+                                    html += `<div class="job"><h3>📄 Job template</h3>${renderAzureTemplateRef(job)}</div>`;
+                                    return;
+                                }
                                 const isManualValidation = job.steps && job.steps.some(step =>
                                     step.task && (step.task.includes('ManualValidation') || step.task.includes('ManualIntervention'))
                                 );
@@ -358,7 +519,8 @@
 
                                     html += '</div>';
                                 } else {
-                                    html += `<div class="job"><h3>${job.displayName || job.job}</h3>`;
+                                    html += `<div class="job"><h3>${escapeHtml(String(job.displayName || job.job || job.deployment || 'Job'))}</h3>`;
+                                    html += renderAzureJobSettings(job);
 
                                     if (job.deployment) {
                                         html += `<div class="approval-badge">🔒 Deployment Job</div>`;
@@ -369,20 +531,13 @@
                                         }
                                     }
 
-                                    if (job.steps) {
-                                        html += '<ul class="steps">';
-                                        job.steps.forEach(step => {
-                                            const sid = `step_${stepCounter++}`;
-                                            allSteps[sid] = step;
-                                            html += `<li data-step="${sid}" style="cursor:pointer;">▶️ ${step.displayName || step.script?.substring(0, 50) || step.task || 'Step'}</li>`;
-                                        });
-                                        html += '</ul>';
-                                    }
+                                    html += renderAzureSteps(job.steps);
+                                    html += renderAzureDeploymentStrategy(job);
                                     html += '</div>';
                                 }
                             } catch (jobError) {
                                 console.error('Error rendering job:', jobError, job);
-                                html += `<div class="job"><h3>${job.displayName || job.job}</h3><p style="color: red;">Error rendering job</p></div>`;
+                                html += `<div class="job"><h3>${escapeHtml(String(job.displayName || job.job || job.deployment || 'Job'))}</h3><p style="color: red;">Error rendering job</p></div>`;
                             }
                         });
                     }

@@ -56,6 +56,14 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **Job settings** — `if` (including `case()` expressions, shown verbatim), `container`, `concurrency`, `permissions`, `timeout-minutes`, `continue-on-error`, `outputs`; workflow-level `concurrency` and `permissions` cards; `runs-on` groups / label lists
   - Steps show their `if` condition; the step popup adds the condition and `with` inputs
   - New sample `samples/github-advanced.yaml`
+- **Azure DevOps**
+  - **Deployment job strategies** — steps in `runOnce`, `rolling` and `canary` lifecycle hooks (`preDeploy`, `deploy`, `routeTraffic`, `postRouteTraffic`, `on.success`, `on.failure`) are now shown, with `maxParallel` / canary `increments`. Previously deployment jobs showed no steps
+  - **Templates** — stage, job and step `template:` references (with their `parameters`) and top-level `extends:` render as reference cards; template contents in other files are not fetched
+  - **Pipeline configuration** — `parameters` (type, default, allowed values), `resources` (repositories, pipelines, containers, …) and a `variables` count
+  - **Stage settings** — `trigger: manual`, `dependsOn`, `condition`, `isSkippable: false`, `lockBehavior`, stage `pool`
+  - **Job settings** — `dependsOn`, `condition`, job `pool`, `container`, `services`, `strategy.matrix` / `parallel` / `maxParallel`, `timeoutInMinutes`, `continueOnError`
+  - Steps show `checkout` / `download` / `publish` shortcuts, `bash` / `pwsh` / `powershell` scripts and their `condition`; stage, job and step names are HTML-escaped
+  - New sample `samples/azure-advanced.yaml`
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19

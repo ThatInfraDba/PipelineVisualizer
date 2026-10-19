@@ -257,6 +257,68 @@ suite('GitHub Actions features', () => {
         assert.strictEqual((html.match(/🔒 Protected Environment/g) || []).length, 1, 'Only the production job creates a deployment');
     });
 });
+suite('Azure DevOps features', () => {
+    const sample = (0, webviewHarness_1.readSample)('azure-advanced.yaml');
+    test('deployment job strategies show their lifecycle steps', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('azure', sample);
+        (0, webviewHarness_1.assertRendered)(html);
+        assertIncludesAll(html, [
+            'Deploy to staging',
+            '📋 Strategy:</strong> runOnce',
+            '🔧 preDeploy',
+            'Pre-deploy checks',
+            '🚀 deploy',
+            '🧯 on failure',
+            'Roll back',
+            '📋 Strategy:</strong> canary (increments 10%, 50%)',
+            'Canary deploy',
+            '✅ postRouteTraffic',
+            'Smoke test'
+        ]);
+    });
+    test('template references, parameters and resources', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('azure', sample);
+        assertIncludesAll(html, [
+            '📄 template: steps/restore.yml@templates',
+            '📄 Job template',
+            '<code>jobs/security-scan.yml@templates</code>',
+            '<code>stages/integration.yml@templates</code>',
+            '<code>enabled</code> = ${{ parameters.runIntegration }}',
+            '<code>environment</code> (Target environment) — string, default <code>staging</code>, values staging, production',
+            'repositories: <code>templates</code> → example/pipeline-templates @ refs/tags/v3',
+            'pipelines: <code>upstream</code> → example-upstream-ci (triggers this pipeline)',
+            'containers: <code>sdk</code> → mcr.microsoft.com/dotnet/sdk:9.0',
+            '2 entries'
+        ]);
+    });
+    test('stage and job settings', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('azure', sample);
+        assertIncludesAll(html, [
+            '⏸️ Manual Stage',
+            'Cannot be skipped at queue time',
+            '🔒 Lock behavior:</strong> sequential',
+            "and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))",
+            '<code>linux</code>, <code>windows</code> (2 job(s))',
+            'Max parallel:</strong> 2',
+            '🐳 Container:</strong> <code>sdk</code>',
+            '<code>redis</code> (redis)',
+            '30 min',
+            'checkout: self',
+            'if succeeded()'
+        ]);
+    });
+    test('extends-only pipelines show the template', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('azure', [
+            'trigger: [main]',
+            'extends:',
+            '  template: secure-pipeline.yml@templates',
+            '  parameters:',
+            '    buildSteps: []'
+        ].join('\n'));
+        (0, webviewHarness_1.assertRendered)(html);
+        assertIncludesAll(html, ['🧬 Extends', '<code>secure-pipeline.yml@templates</code>']);
+    });
+});
 suite('Bitbucket Pipelines features', () => {
     const sample = (0, webviewHarness_1.readSample)('bitbucket-advanced.yml');
     test('shows triggers, agents, clone, options and services', () => {
