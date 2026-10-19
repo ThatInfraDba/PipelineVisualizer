@@ -36,9 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
-const yaml = __importStar(require("js-yaml"));
 const path = __importStar(require("path"));
 const visualizerPanel_1 = require("./visualizerPanel");
+const yamlParser_1 = require("./yamlParser");
 function activate(context) {
     console.log('Pipeline Visualizer extension is now active');
     // Register the visualize command
@@ -57,14 +57,11 @@ function activate(context) {
             return;
         }
         // Get the YAML content
-        const rawYaml = document.getText();
-        // Strip custom YAML tags (e.g. CloudFormation !Sub, !Ref, !GetAtt) that
-        // js-yaml rejects as unknown. Tag semantics are not needed for visualization.
-        const yamlContent = rawYaml.replace(/![A-Za-z][A-Za-z0-9]*/g, '');
+        const yamlContent = (0, yamlParser_1.stripCustomTags)(document.getText());
         try {
             // Parse YAML to validate it
-            const pipelineData = yaml.load(yamlContent);
-            if (!pipelineData || typeof pipelineData !== 'object') {
+            const parsed = (0, yamlParser_1.parsePipelineYaml)(yamlContent);
+            if (!parsed.data || typeof parsed.data !== 'object') {
                 vscode.window.showErrorMessage('Invalid YAML content.');
                 return;
             }
@@ -73,7 +70,7 @@ function activate(context) {
             const layoutPreference = config.get('diagramLayout', 'automatic');
             const colorTheme = config.get('colorTheme', 'dark');
             // Create and show the visualizer panel
-            visualizerPanel_1.PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
+            visualizerPanel_1.PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, parsed, layoutPreference, colorTheme, fileName);
         }
         catch (error) {
             vscode.window.showErrorMessage(`Error parsing YAML: ${error}`);

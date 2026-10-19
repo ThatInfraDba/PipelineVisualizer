@@ -11,6 +11,23 @@
         const themeCardBg = window.pvConfig.cardBg;
         const themeTextColor = window.pvConfig.textColor;
 
+        let pipelineSpec = null;
+
+        // GitLab components and pipelines using `spec:inputs` are two YAML documents
+        // separated by `---`: a header containing only `spec:`, then the pipeline.
+        // Keep in sync with parsePipelineYaml in src/yamlParser.ts.
+        function parsePipelineYaml(yamlContent) {
+            const docs = jsyaml.loadAll(yamlContent).filter(d => d !== null && d !== undefined);
+            if (docs.length === 0) { return { data: undefined, specHeader: null }; }
+            const first = docs[0];
+            const isSpecHeader = first && typeof first === 'object' && !Array.isArray(first) &&
+                Object.keys(first).length === 1 && first.spec !== undefined;
+            if (isSpecHeader) {
+                return { data: docs.length > 1 ? docs[1] : {}, specHeader: first.spec };
+            }
+            return { data: first, specHeader: null };
+        }
+
         function refreshVisualization() {
             vscode.postMessage({ command: 'refresh' });
         }
@@ -45,7 +62,9 @@
             const message = event.data;
             if (message.command === 'refreshData') {
                 try {
-                    pipelineData = jsyaml.load(message.yamlContent);
+                    const parsed = parsePipelineYaml(message.yamlContent);
+                    pipelineData = parsed.data;
+                    pipelineSpec = parsed.specHeader;
 
                     if (!pipelineData || typeof pipelineData !== 'object') {
                         showError(
@@ -181,10 +200,20 @@
                     return;
                 }
 
+                // Pipelines without `stages:` run as a single implicit stage (and job, for `steps:` only)
+                if (!data.stages && Array.isArray(data.jobs)) {
+                    data = Object.assign({}, data, { stages: [{ stage: 'Stage', jobs: data.jobs }] });
+                } else if (!data.stages && Array.isArray(data.steps)) {
+                    data = Object.assign({}, data, { stages: [{ stage: 'Stage', jobs: [{ job: 'Job', steps: data.steps }] }] });
+                }
+
                 let html = `<p><strong>Pipeline:</strong> ${data.name || 'Unnamed'}</p>`;
             html += '<div class="info-grid">';
             if (data.trigger) html += '<div class="info-card"><h3>📋 Trigger</h3><p>Configured</p></div>';
-            if (data.pool) html += '<div class="info-card"><h3>🖥️ Pool</h3><p>' + (data.pool.name || 'Default') + '</p></div>';
+            if (data.pool) {
+                const poolName = typeof data.pool === 'string' ? data.pool : (data.pool.vmImage || data.pool.name || 'Default');
+                html += '<div class="info-card"><h3>🖥️ Pool</h3><p>' + escapeHtml(String(poolName)) + '</p></div>';
+            }
             if (data.stages) html += `<div class="info-card"><h3>📊 Stages</h3><p>${data.stages.length}</p></div>`;
             html += '</div>';
 
@@ -403,21 +432,35 @@
                     !RESERVED.has(key) && !key.startsWith('.') && typeof value === 'object' && value !== null
                 );
 
-                const stageOrder = data.stages || ['build', 'test', 'deploy'];
+                // .pre and .post always run first and last, whether or not they are declared
+                const declaredStages = (Array.isArray(data.stages) ? data.stages : ['build', 'test', 'deploy'])
+                    .filter(s => s !== '.pre' && s !== '.post');
+                const stageOrder = ['.pre', ...declaredStages, '.post'];
                 const jobsByStage = {};
                 stageOrder.forEach(s => { jobsByStage[s] = []; });
+                const undeclaredStages = [];
                 jobEntries.forEach(([key, job]) => {
                     const stage = job.stage || 'test';
-                    if (!jobsByStage[stage]) { jobsByStage[stage] = []; }
+                    if (!jobsByStage[stage]) {
+                        jobsByStage[stage] = [];
+                        undeclaredStages.push(stage);
+                    }
                     jobsByStage[stage].push({ key, job });
                 });
 
-                const activeStages = stageOrder.filter(s => jobsByStage[s] && jobsByStage[s].length > 0);
+                // Jobs in undeclared stages are invalid in GitLab, but show them rather than drop them
+                const activeStages = [...stageOrder.slice(0, -1), ...undeclaredStages, '.post']
+                    .filter(s => jobsByStage[s].length > 0);
 
                 let html = `<p><strong>Pipeline:</strong> ${(data.workflow && data.workflow.name) || 'GitLab CI Pipeline'}</p>`;
+                if (pipelineSpec && pipelineSpec.description) {
+                    html += `<p>${escapeHtml(String(pipelineSpec.description))}</p>`;
+                }
                 html += '<div class="info-grid">';
                 html += `<div class="info-card"><h3>📊 Stages</h3><p>${activeStages.length}</p></div>`;
                 html += `<div class="info-card"><h3>💼 Jobs</h3><p>${jobEntries.length}</p></div>`;
+                const specInputs = (pipelineSpec && pipelineSpec.inputs && typeof pipelineSpec.inputs === 'object') ? pipelineSpec.inputs : null;
+                if (specInputs) html += `<div class="info-card"><h3>📥 Inputs</h3><p>${Object.keys(specInputs).length} declared</p></div>`;
                 if (data.variables) html += `<div class="info-card"><h3>🔧 Variables</h3><p>${Object.keys(data.variables).length} defined</p></div>`;
                 if (data.workflow) html += '<div class="info-card"><h3>🔀 Workflow</h3><p>Configured</p></div>';
                 if (data.default && data.default.image) {
@@ -456,10 +499,38 @@
                 }
                 html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
 
+                if (specInputs) {
+                    const inputsColor = stageColors[(activeStages.length) % stageColors.length];
+                    html += `<div class="stage" style="border-color: ${inputsColor}; background: linear-gradient(135deg, ${inputsColor}33 0%, ${inputsColor}14 100%);">`;
+                    html += `<h2 style="background: ${inputsColor}; color: white;">📥 Inputs</h2>`;
+                    Object.entries(specInputs).forEach(([name, input]) => {
+                        const def = (input && typeof input === 'object') ? input : {};
+                        html += `<div class="job"><h3><code>${escapeHtml(name)}</code></h3>`;
+                        html += `<p><strong>Type:</strong> ${escapeHtml(String(def.type || 'string'))}</p>`;
+                        if (def.default !== undefined) {
+                            const defaultValue = typeof def.default === 'object' ? JSON.stringify(def.default) : String(def.default);
+                            html += `<p><strong>Default:</strong> <code>${escapeHtml(defaultValue)}</code></p>`;
+                        } else {
+                            html += '<p class="approval-info">⚠️ Required (no default)</p>';
+                        }
+                        if (Array.isArray(def.options)) {
+                            html += `<p><strong>Options:</strong> ${def.options.map(o => escapeHtml(String(o))).join(', ')}</p>`;
+                        }
+                        if (def.description) {
+                            html += `<p>${escapeHtml(String(def.description))}</p>`;
+                        }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
                 activeStages.forEach((stage, idx) => {
                     const color = stageColors[idx % stageColors.length];
                     html += `<div id="GL${idx}" class="stage" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);">`;
-                    html += `<h2 style="background: ${color}; color: white;">🦊 ${stage}</h2>`;
+                    html += `<h2 style="background: ${color}; color: white;">🦊 ${escapeHtml(stage)}</h2>`;
+                    if (undeclaredStages.includes(stage)) {
+                        html += `<p class="approval-info">⚠️ Stage "${escapeHtml(stage)}" is not declared in <code>stages:</code> — GitLab will reject this configuration</p>`;
+                    }
 
                     (jobsByStage[stage] || []).forEach(({ key, job }) => {
                         const isManual = job.when === 'manual';
@@ -549,6 +620,37 @@
             }
         }
 
+        // Shared by the primary artifact and each entry of `secondary-artifacts`
+        function renderArtifactDetails(artifact) {
+            let html = '';
+            if (artifact.files) {
+                const files = Array.isArray(artifact.files) ? artifact.files : [artifact.files];
+                html += `<p><strong>Files:</strong></p><ul class="steps">`;
+                files.forEach(f => { html += `<li style="cursor:default;">📄 ${escapeHtml(String(f))}</li>`; });
+                html += '</ul>';
+            }
+            if (artifact['exclude-paths']) {
+                const excluded = Array.isArray(artifact['exclude-paths']) ? artifact['exclude-paths'] : [artifact['exclude-paths']];
+                html += `<p><strong>Exclude paths:</strong> <code>${excluded.map(p => escapeHtml(String(p))).join(', ')}</code></p>`;
+            }
+            if (artifact['base-directory']) {
+                html += `<p><strong>Base directory:</strong> <code>${escapeHtml(String(artifact['base-directory']))}</code></p>`;
+            }
+            if (artifact.name) {
+                html += `<p><strong>Artifact name:</strong> <code>${escapeHtml(String(artifact.name))}</code></p>`;
+            }
+            if (artifact['s3-prefix']) {
+                html += `<p><strong>S3 prefix:</strong> <code>${escapeHtml(String(artifact['s3-prefix']))}</code></p>`;
+            }
+            if (artifact['discard-paths'] !== undefined) {
+                html += `<p><strong>Discard paths:</strong> ${escapeHtml(String(artifact['discard-paths']))}</p>`;
+            }
+            if (artifact['enable-symlinks'] !== undefined) {
+                html += `<p><strong>Enable symlinks:</strong> ${escapeHtml(String(artifact['enable-symlinks']))}</p>`;
+            }
+            return html;
+        }
+
         function renderAWSCodeBuild(data) {
             try {
                 if (!data) {
@@ -563,9 +665,16 @@
                 html += '<div class="info-grid">';
                 html += `<div class="info-card"><h3>🔧 Phases</h3><p>${presentPhases.length} defined</p></div>`;
 
+                const secondaryArtifacts = (data.artifacts && data.artifacts['secondary-artifacts'] && typeof data.artifacts['secondary-artifacts'] === 'object')
+                    ? Object.entries(data.artifacts['secondary-artifacts'])
+                    : [];
                 if (data.artifacts) {
                     const artifactFiles = Array.isArray(data.artifacts.files) ? data.artifacts.files.length : (data.artifacts.files ? 1 : 0);
-                    html += `<div class="info-card"><h3>📦 Artifacts</h3><p>${artifactFiles} file pattern(s)</p></div>`;
+                    let artifactSummary = `${artifactFiles} file pattern(s)`;
+                    if (secondaryArtifacts.length) {
+                        artifactSummary += ` + ${secondaryArtifacts.length} secondary`;
+                    }
+                    html += `<div class="info-card"><h3>📦 Artifacts</h3><p>${artifactSummary}</p></div>`;
                 }
 
                 if (data.env) {
@@ -654,18 +763,12 @@
                 if (data.artifacts) {
                     html += `<div class="stage" style="border-color: ${phaseColors[4 % phaseColors.length]}; background: linear-gradient(135deg, ${phaseColors[4 % phaseColors.length]}33 0%, ${phaseColors[4 % phaseColors.length]}14 100%);">`;
                     html += `<h2 style="background: ${phaseColors[4 % phaseColors.length]}; color: white;">📦 Artifacts</h2>`;
-                    if (data.artifacts.files) {
-                        const files = Array.isArray(data.artifacts.files) ? data.artifacts.files : [data.artifacts.files];
-                        html += `<p><strong>Files:</strong></p><ul class="steps">`;
-                        files.forEach(f => { html += `<li style="cursor:default;">📄 ${escapeHtml(String(f))}</li>`; });
-                        html += '</ul>';
-                    }
-                    if (data.artifacts['base-directory']) {
-                        html += `<p><strong>Base directory:</strong> <code>${escapeHtml(String(data.artifacts['base-directory']))}</code></p>`;
-                    }
-                    if (data.artifacts.name) {
-                        html += `<p><strong>Artifact name:</strong> <code>${escapeHtml(String(data.artifacts.name))}</code></p>`;
-                    }
+                    html += renderArtifactDetails(data.artifacts);
+                    secondaryArtifacts.forEach(([identifier, artifact]) => {
+                        html += `<div class="job"><h3>📦 Secondary: <code>${escapeHtml(identifier)}</code></h3>`;
+                        html += renderArtifactDetails(artifact || {});
+                        html += '</div>';
+                    });
                     html += '</div>';
                 }
 
@@ -903,6 +1006,41 @@
                 }
                 html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
 
+                // Script entries are usually command strings, but can also be objects
+                // such as `- pipe: atlassian/...` or `- agent: <name>`
+                const renderScriptList = function(entries, icon) {
+                    const list = Array.isArray(entries) ? entries : (entries ? [entries] : []);
+                    if (!list.length) { return ''; }
+                    let out = '<ul class="steps">';
+                    list.forEach(function(entry) {
+                        const sid = 'step_' + stepCounter++;
+                        let label;
+                        let itemIcon = icon;
+                        if (entry && typeof entry === 'object') {
+                            if (entry.pipe) {
+                                itemIcon = '🔌';
+                                label = 'pipe: ' + String(entry.pipe);
+                            } else if (entry.agent) {
+                                itemIcon = '🤖';
+                                label = 'agent: ' + String(entry.agent);
+                            } else {
+                                const firstKey = Object.keys(entry)[0];
+                                const firstValue = firstKey !== undefined ? entry[firstKey] : '';
+                                label = firstKey !== undefined
+                                    ? firstKey + ': ' + (typeof firstValue === 'object' ? JSON.stringify(firstValue) : String(firstValue))
+                                    : '{}';
+                            }
+                            allSteps[sid] = Object.assign({ displayName: label }, entry);
+                        } else {
+                            label = String(entry);
+                            allSteps[sid] = { script: label, displayName: label.substring(0, 80) };
+                        }
+                        out += '<li data-step="' + sid + '" style="cursor:pointer;">' + itemIcon + ' ' + escapeHtml(label.substring(0, 80)) + (label.length > 80 ? '…' : '') + '</li>';
+                    });
+                    out += '</ul>';
+                    return out;
+                };
+
                 const renderStep = function(step) {
                     let out = '<div class="job"><h3>' + escapeHtml(step.name || 'Unnamed Step') + '</h3>';
                     if (step.deployment) {
@@ -928,25 +1066,8 @@
                     if (step.artifacts && step.artifacts.paths) {
                         out += '<p><strong>📦 Artifacts:</strong> ' + step.artifacts.paths.join(', ') + '</p>';
                     }
-                    const cmds = Array.isArray(step.script) ? step.script : (step.script ? [step.script] : []);
-                    if (cmds.length) {
-                        out += '<ul class="steps">';
-                        cmds.forEach(function(cmd) {
-                            const sid = 'step_' + stepCounter++;
-                            allSteps[sid] = { script: String(cmd), displayName: String(cmd).substring(0, 80) };
-                            out += '<li data-step="' + sid + '" style="cursor:pointer;">▶️ ' + escapeHtml(String(cmd).substring(0, 80)) + (String(cmd).length > 80 ? '…' : '') + '</li>';
-                        });
-                        out += '</ul>';
-                    }
-                    if (step['after-script'] && step['after-script'].length) {
-                        out += '<ul class="steps">';
-                        step['after-script'].forEach(function(cmd) {
-                            const sid = 'step_' + stepCounter++;
-                            allSteps[sid] = { script: String(cmd), displayName: String(cmd).substring(0, 80) };
-                            out += '<li data-step="' + sid + '" style="cursor:pointer;">🔚 ' + escapeHtml(String(cmd).substring(0, 80)) + (String(cmd).length > 80 ? '…' : '') + '</li>';
-                        });
-                        out += '</ul>';
-                    }
+                    out += renderScriptList(step.script, '▶️');
+                    out += renderScriptList(step['after-script'], '🔚');
                     out += '</div>';
                     return out;
                 };

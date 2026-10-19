@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import * as yaml from 'js-yaml';
 import * as path from 'path';
 import { PipelineVisualizerPanel } from './visualizerPanel';
+import { parsePipelineYaml, stripCustomTags } from './yamlParser';
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Pipeline Visualizer extension is now active');
@@ -26,16 +26,13 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		// Get the YAML content
-		const rawYaml = document.getText();
-		// Strip custom YAML tags (e.g. CloudFormation !Sub, !Ref, !GetAtt) that
-		// js-yaml rejects as unknown. Tag semantics are not needed for visualization.
-		const yamlContent = rawYaml.replace(/![A-Za-z][A-Za-z0-9]*/g, '');
+		const yamlContent = stripCustomTags(document.getText());
 
 		try {
 			// Parse YAML to validate it
-			const pipelineData = yaml.load(yamlContent);
+			const parsed = parsePipelineYaml(yamlContent);
 
-			if (!pipelineData || typeof pipelineData !== 'object') {
+			if (!parsed.data || typeof parsed.data !== 'object') {
 				vscode.window.showErrorMessage('Invalid YAML content.');
 				return;
 			}
@@ -46,7 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const colorTheme = config.get<string>('colorTheme', 'dark');
 
 			// Create and show the visualizer panel
-			PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
+			PipelineVisualizerPanel.createOrShow(context.extensionUri, yamlContent, parsed, layoutPreference, colorTheme, fileName);
 			
 		} catch (error) {
 			vscode.window.showErrorMessage(`Error parsing YAML: ${error}`);

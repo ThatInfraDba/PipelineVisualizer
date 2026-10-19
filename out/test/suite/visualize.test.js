@@ -48,8 +48,11 @@ const samplesDir = path.join(extensionRoot, 'samples');
 const { PipelineVisualizerPanel } = require(path.join(extensionRoot, 'out', 'visualizerPanel.js'));
 const SAMPLES = [
     { file: 'azure-pipeline.yaml', expectedBadge: 'Azure DevOps' },
+    { file: 'azure-jobs-only.yaml', expectedBadge: 'Azure DevOps' },
+    { file: 'azure-steps-only.yaml', expectedBadge: 'Azure DevOps' },
     { file: 'github-workflow.yaml', expectedBadge: 'GitHub Actions' },
     { file: 'gitlab-pipeline.yaml', expectedBadge: 'GitLab CI' },
+    { file: 'gitlab-component.yml', expectedBadge: 'GitLab CI' },
     { file: 'awsbuildspec-sample.yml', expectedBadge: 'AWS CodeBuild' },
     { file: 'awscodebuild-pipeline.yaml', expectedBadge: 'AWS CloudFormation' },
     { file: 'bitbucket-pipeline.yaml', expectedBadge: 'Bitbucket Pipelines' },

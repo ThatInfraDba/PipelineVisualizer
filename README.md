@@ -73,6 +73,7 @@ The extension will:
 
 ### Azure DevOps Pipelines
 - Stages, jobs, and steps
+- Stage-less pipelines (top-level `jobs:` or `steps:` only)
 - Manual approval gates
 - Dependencies and conditions
 - Pool configurations
@@ -88,7 +89,8 @@ The extension will:
 - Step conditions and parameters
 
 ### GitLab CI/CD Pipelines _(new in v1.2.0 — additional testing in progress)_
-- Jobs and stages
+- Jobs and stages, including `.pre` and `.post`
+- CI/CD components and `spec:inputs` headers
 - Job dependencies (`needs:`, `dependencies:`)
 - Artifacts and caches
 - Rules and conditions
@@ -106,6 +108,7 @@ The extension will:
 - Pipeline selector dropdown to switch between named pipelines
 - Parallel step groups
 - Stages and deployment steps
+- Pipes (`pipe:`) and agentic steps (`agent:`)
 - Service containers and caches
 
 ## Extension Settings
@@ -147,6 +150,15 @@ If you find this extension helpful:
 ---
 
 ## Release Notes
+
+### 1.4.1
+
+Bug Fixes:
+- **Bitbucket `pipe:` / `agent:` steps showed as `[object Object]`** — now shown as readable `🔌 pipe:` / `🤖 agent:` entries ([#29](https://github.com/ThatInfraDba/PipelineVisualizer/issues/29))
+- **GitLab jobs in `.pre` / `.post` or undeclared stages were dropped** — `.pre` / `.post` now always render first / last, and jobs in undeclared stages are shown with a warning ([#30](https://github.com/ThatInfraDba/PipelineVisualizer/issues/30))
+- **GitLab CI/CD components and `spec:inputs` files failed to parse** — multi-document files are now supported, with declared inputs shown in their own section ([#31](https://github.com/ThatInfraDba/PipelineVisualizer/issues/31))
+- **AWS CodeBuild secondary artifacts were not shown** — `secondary-artifacts` and artifact options (`discard-paths`, `exclude-paths`, `s3-prefix`, `enable-symlinks`) now render ([#32](https://github.com/ThatInfraDba/PipelineVisualizer/issues/32))
+- **Azure DevOps pipelines without `stages:` rendered empty** — jobs-only and steps-only pipelines now render, and the Pool card shows `vmImage` ([#33](https://github.com/ThatInfraDba/PipelineVisualizer/issues/33))
 
 ### 1.4.0
 

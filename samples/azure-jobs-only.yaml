@@ -1,0 +1,21 @@
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+  - job: Build
+    displayName: Build application
+    steps:
+      - script: npm ci
+        displayName: Install dependencies
+      - script: npm run build
+        displayName: Build
+
+  - job: Test
+    displayName: Run tests
+    dependsOn: Build
+    steps:
+      - script: npm test
+        displayName: Unit tests
