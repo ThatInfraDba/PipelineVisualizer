@@ -35,7 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.PipelineVisualizerPanel = void 0;
 const vscode = __importStar(require("vscode"));
-const yaml = __importStar(require("js-yaml"));
+const yamlParser_1 = require("./yamlParser");
 const THEMES = {
     dark: {
         mermaidTheme: 'dark',
@@ -201,7 +201,7 @@ const THEMES = {
     },
 };
 class PipelineVisualizerPanel {
-    static createOrShow(extensionUri, yamlContent, pipelineData, layoutPreference, colorTheme, fileName = '') {
+    static createOrShow(extensionUri, yamlContent, parsed, layoutPreference, colorTheme, fileName = '') {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
@@ -209,7 +209,7 @@ class PipelineVisualizerPanel {
         if (PipelineVisualizerPanel.currentPanel) {
             PipelineVisualizerPanel.currentPanel._panel.reveal(column);
             PipelineVisualizerPanel.currentPanel._documentUri = documentUri;
-            PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
+            PipelineVisualizerPanel.currentPanel._update(yamlContent, parsed, layoutPreference, colorTheme, fileName);
             return;
         }
         const panel = vscode.window.createWebviewPanel(PipelineVisualizerPanel.viewType, 'Pipeline Visualization', column || vscode.ViewColumn.One, {
@@ -219,7 +219,7 @@ class PipelineVisualizerPanel {
         });
         PipelineVisualizerPanel.currentPanel = new PipelineVisualizerPanel(panel, extensionUri);
         PipelineVisualizerPanel.currentPanel._documentUri = documentUri;
-        PipelineVisualizerPanel.currentPanel._update(yamlContent, pipelineData, layoutPreference, colorTheme, fileName);
+        PipelineVisualizerPanel.currentPanel._update(yamlContent, parsed, layoutPreference, colorTheme, fileName);
     }
     static revive(panel, extensionUri, _state) {
         PipelineVisualizerPanel.currentPanel = new PipelineVisualizerPanel(panel, extensionUri);
@@ -242,9 +242,9 @@ class PipelineVisualizerPanel {
                     if (this._documentUri) {
                         vscode.workspace.openTextDocument(this._documentUri).then(document => {
                             const rawYaml = document.getText();
-                            const yamlContent = rawYaml.replace(/![A-Za-z][A-Za-z0-9]*/g, '');
+                            const yamlContent = (0, yamlParser_1.stripCustomTags)(rawYaml);
                             try {
-                                yaml.load(yamlContent);
+                                (0, yamlParser_1.parsePipelineYaml)(yamlContent);
                                 this._panel.webview.postMessage({
                                     command: 'refreshData',
                                     yamlContent: yamlContent
@@ -270,10 +270,10 @@ class PipelineVisualizerPanel {
             }
         }, null, this._disposables);
     }
-    _update(yamlContent, pipelineData, layoutPreference, colorTheme, fileName = '') {
+    _update(yamlContent, parsed, layoutPreference, colorTheme, fileName = '') {
         const webview = this._panel.webview;
         this._yamlContent = yamlContent;
-        this._panel.webview.html = this._getHtmlForWebview(webview, pipelineData, layoutPreference, colorTheme, fileName);
+        this._panel.webview.html = this._getHtmlForWebview(webview, parsed, layoutPreference, colorTheme, fileName);
     }
     dispose() {
         PipelineVisualizerPanel.currentPanel = undefined;
@@ -319,10 +319,10 @@ class PipelineVisualizerPanel {
         });
         return rules.join('\n        ');
     }
-    _getHtmlForWebview(webview, pipelineData, layoutPreference, colorTheme, fileName = '') {
+    _getHtmlForWebview(webview, parsed, layoutPreference, colorTheme, fileName = '') {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'webview.js'));
         const jsYamlUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'js-yaml', 'dist', 'browser', 'js-yaml.umd.min.js'));
-        const platform = this._detectPlatform(pipelineData, fileName);
+        const platform = this._detectPlatform(parsed.data, fileName, !!parsed.specHeader);
         const platformClass = platform === 'github' ? 'github-mode' : '';
         const platformBadge = platform === 'github'
             ? '<span class="platform-badge github">🐙 GitHub Actions</span>'
@@ -457,7 +457,7 @@ class PipelineVisualizerPanel {
 </body>
 </html>`;
     }
-    _detectPlatform(data, fileName = '') {
+    _detectPlatform(data, fileName = '', hasSpecHeader = false) {
         // Filename-based signals (strongest)
         if (fileName.toLowerCase().includes('gitlab-ci')) {
             return 'gitlab';
@@ -467,6 +467,10 @@ class PipelineVisualizerPanel {
         }
         if (fileName.toLowerCase().includes('bitbucket-pipelines')) {
             return 'bitbucket';
+        }
+        // A `spec:` header document is GitLab CI/CD component / inputs syntax
+        if (hasSpecHeader) {
+            return 'gitlab';
         }
         // AWS CloudFormation: AWSTemplateFormatVersion is definitive; also catch templates
         // that omit it but have Resources with AWS:: typed entries

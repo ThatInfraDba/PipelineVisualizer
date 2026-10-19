@@ -31,6 +31,17 @@ artifacts:
   base-directory: build
   files:
     - '**/*'
+  secondary-artifacts:
+    coverage:
+      base-directory: coverage
+      files:
+        - '**/*'
+      name: coverage-report
+      discard-paths: no
+    sourcemaps:
+      files:
+        - 'build/static/js/*.map'
+      discard-paths: yes
 
 cache:
   paths:

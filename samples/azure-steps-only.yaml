@@ -1,0 +1,15 @@
+trigger:
+  - main
+
+pool:
+  vmImage: windows-latest
+
+steps:
+  - task: NuGetToolInstaller@1
+    displayName: Install NuGet
+
+  - script: dotnet build --configuration Release
+    displayName: Build solution
+
+  - script: dotnet test --no-build
+    displayName: Run tests

@@ -1,0 +1,51 @@
+spec:
+  description: Build, test and deploy a container image as a reusable CI/CD component
+  inputs:
+    environment:
+      options: [dev, staging, production]
+      default: dev
+      description: Target deployment environment
+    image_tag:
+      type: string
+      description: Tag pushed to the registry
+    run_lint:
+      type: boolean
+      default: true
+---
+stages:
+  - build
+  - test
+  - deploy
+
+prepare:
+  stage: .pre
+  script:
+    - echo "Preparing workspace"
+
+build-image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t "$CI_REGISTRY_IMAGE:$[[ inputs.image_tag ]]" .
+    - docker push "$CI_REGISTRY_IMAGE:$[[ inputs.image_tag ]]"
+
+lint:
+  stage: test
+  needs: []
+  script:
+    - echo "Linting"
+
+deploy:
+  stage: deploy
+  environment:
+    name: $[[ inputs.environment ]]
+  when: manual
+  script:
+    - echo "Deploying to $[[ inputs.environment ]]"
+
+cleanup:
+  stage: .post
+  script:
+    - echo "Cleaning up"

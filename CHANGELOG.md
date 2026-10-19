@@ -2,6 +2,21 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.4.1] - 2026-10-19
+
+Fixes found while auditing all supported platforms against their current YAML syntax.
+
+### Fixed
+- **Bitbucket `pipe:` / `agent:` script entries rendered as `[object Object]`** ([#29](https://github.com/ThatInfraDba/PipelineVisualizer/issues/29)) — script and `after-script` entries were converted with `String(cmd)`, so object entries such as `- pipe: atlassian/aws-s3-deploy:1.1.0` or the new `- agent: <name>` agentic steps lost their content. They now render as `🔌 pipe: …` / `🤖 agent: …` (other object entries fall back to `key: value`), and the full entry (e.g. pipe `variables`) is available in the step detail popup. A single-string `after-script` no longer throws
+- **GitLab jobs in `.pre` / `.post` or undeclared stages were silently dropped** ([#30](https://github.com/ThatInfraDba/PipelineVisualizer/issues/30)) — only stages listed in `stages:` were rendered. `.pre` and `.post` now always render first and last, the default stage list when `stages:` is absent matches GitLab (`.pre, build, test, deploy, .post`), and jobs in a stage not declared in `stages:` are shown with a warning instead of being omitted
+- **GitLab CI/CD components and `spec:inputs` files failed to parse** ([#31](https://github.com/ThatInfraDba/PipelineVisualizer/issues/31)) — these files are two YAML documents (a `spec:` header, `---`, then the pipeline) and `yaml.load` rejected them with "expected a single document in the stream". Parsing now uses `loadAll` (new `src/yamlParser.ts`, mirrored in the webview): a `spec:`-only first document is treated as the header, otherwise the first non-empty document is visualized. A `spec:` header also marks the file as GitLab CI. Declared inputs (type, default / required, `options`, description) and `spec:description` are shown in a new **📥 Inputs** section
+- **AWS CodeBuild secondary artifacts were not rendered** ([#32](https://github.com/ThatInfraDba/PipelineVisualizer/issues/32)) — v1.2.0 listed them as supported but `artifacts.secondary-artifacts` was never read. Each secondary artifact now renders in the Artifacts section, the info card counts them, and `discard-paths`, `exclude-paths`, `s3-prefix` and `enable-symlinks` are shown for primary and secondary artifacts
+- **Azure DevOps pipelines without `stages:` rendered empty** ([#33](https://github.com/ThatInfraDba/PipelineVisualizer/issues/33)) — pipelines with only top-level `jobs:` or `steps:` are now wrapped in an implicit stage (and job) before rendering. The Pool card now shows `vmImage` (or a string pool name) instead of "Default"
+
+### Added
+- **Webview rendering tests** (`src/test/suite/webviewRender.test.ts`) — run `media/webview.js` in a Node `vm` with a minimal DOM stub and assert on the rendered HTML, covering each fix above. The VS Code integration tests can only see the webview shell, not its rendered content
+- **Samples** — `samples/gitlab-component.yml` (`spec:inputs` header, `.pre` / `.post` jobs), `samples/azure-jobs-only.yaml`, `samples/azure-steps-only.yaml`; `samples/awsbuildspec-sample.yml` now includes `secondary-artifacts`. All are covered by the integration tests
+
 ## [1.4.0] - 2026-10-19
 
 Rolls up all open Dependabot PRs (#13, #20, #22, #23, #24, #26, #27) into a single release and fixes the CI failure they all shared.
