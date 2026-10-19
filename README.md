@@ -4,8 +4,6 @@ Visualize your CI/CD pipeline YAML files directly in VS Code with beautiful, int
 
 🔗 **[GitHub Repository](https://github.com/ThatInfraDba/PipelineVisualizer)** | 📦 **[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=DannydeHaan.pipeline-visualizer)** | 💖 **[Sponsor this Project](https://github.com/sponsors/ThatInfraDba)**
 
-> **Note:** GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new in v1.2.0 and still undergoing testing. Please report any issues on GitHub.
-
 ## Features
 
 - **🤖 Auto-Detection** - Automatically identifies Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines
@@ -91,7 +89,7 @@ The extension will:
 - Environments (including `deployment: false`), service containers, containers
 - Concurrency, permissions, timeouts, and outputs
 
-### GitLab CI/CD Pipelines _(new in v1.2.0 — additional testing in progress)_
+### GitLab CI/CD Pipelines
 - Jobs and stages, including `.pre` and `.post`
 - Job-level dependency graph when `needs:` is used
 - `extends:` and `!reference` resolution
@@ -100,7 +98,7 @@ The extension will:
 - `include:` sources, `workflow:` rules and `auto_cancel`
 - Rules, artifacts, caches, services, environments, and other job settings
 
-### AWS CodeBuild Buildspec _(new in v1.2.0 — additional testing in progress)_
+### AWS CodeBuild Buildspec
 - Build phases (install, pre-build, build, post-build) with `on-failure` and `run-as`
 - Batch builds: `build-graph` dependency graph, `build-list`, `build-matrix`, `build-fanout`
 - Runtime versions
@@ -116,7 +114,7 @@ The extension will:
 - `Commands` actions and manual approval actions
 - CodeBuild project resources
 
-### Bitbucket Pipelines _(new in v1.2.0 — additional testing in progress)_
+### Bitbucket Pipelines
 - Default, branch, PR, tag, and custom pipeline variants
 - Pipeline selector dropdown to switch between named pipelines
 - Parallel step groups drawn as parallel branches
@@ -148,7 +146,6 @@ This extension contributes the following settings:
 
 - Very large pipeline files (>1000 lines) may take a moment to render
 - Complex Mermaid diagrams with many dependencies might need horizontal scrolling
-- GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and may not handle all edge cases — please report issues on GitHub
 - If the visualization panel shows a "Scripts Failed to Load" error, check that your machine can reach `cdn.jsdelivr.net` (required for Mermaid and js-yaml)
 
 ## Support This Project
@@ -266,8 +263,6 @@ New Platform Support:
 
 New Features:
 - **Color Themes** — six built-in themes (dark, light, ocean, forest, sunset, monochrome) configurable via extension settings
-
-> GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and still undergoing testing. Please report any issues.
 
 ### 1.1.0
 

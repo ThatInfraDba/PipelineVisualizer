@@ -64,6 +64,7 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **Job settings** — `dependsOn`, `condition`, job `pool`, `container`, `services`, `strategy.matrix` / `parallel` / `maxParallel`, `timeoutInMinutes`, `continueOnError`
   - Steps show `checkout` / `download` / `publish` shortcuts, `bash` / `pwsh` / `powershell` scripts and their `condition`; stage, job and step names are HTML-escaped
   - New sample `samples/azure-advanced.yaml`
+- **README** — removed the "new in v1.2.0 / still undergoing testing" notes for GitLab CI/CD, AWS CodeBuild and Bitbucket Pipelines (top banner, Supported Formats headings, Known Issues, 1.2.0 release notes); all platforms now have sample-based integration and rendering test coverage
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19
