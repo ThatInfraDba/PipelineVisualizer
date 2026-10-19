@@ -47,7 +47,9 @@ const webviewScript = fs.readFileSync(path.join(extensionRoot, 'media', 'webview
 // Runs media/webview.js in a Node VM with a minimal DOM stub and returns the
 // HTML the renderer writes into #content. The VS Code integration tests can
 // only see the webview shell, so rendered output is asserted here.
-function renderInWebview(platform, yamlContent) {
+// `followUp` is extra code run inside the webview context after the first render,
+// e.g. to switch the selected Bitbucket pipeline and re-render.
+function renderInWebview(platform, yamlContent, followUp) {
     const elements = {};
     const getElement = (id) => {
         if (!elements[id]) {
@@ -102,9 +104,13 @@ function renderInWebview(platform, yamlContent) {
             messageHandler = handler;
         }
     };
-    vm.runInNewContext(webviewScript, context);
+    vm.createContext(context);
+    vm.runInContext(webviewScript, context);
     assert.ok(messageHandler, 'webview.js did not register a message handler');
     messageHandler({ data: { command: 'refreshData', yamlContent } });
+    if (followUp) {
+        vm.runInContext(followUp, context);
+    }
     return getElement('content').innerHTML;
 }
 function readSample(file) {

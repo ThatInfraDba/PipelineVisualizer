@@ -29,7 +29,8 @@ const SAMPLES: SampleCase[] = [
 	{ file: 'awsbuildspec-sample.yml', expectedBadge: 'AWS CodeBuild' },
 	{ file: 'awscodebuild-pipeline.yaml', expectedBadge: 'AWS CloudFormation' },
 	{ file: 'bitbucket-pipeline.yaml', expectedBadge: 'Bitbucket Pipelines' },
-	{ file: 'bitbucket-pipelines.yml', expectedBadge: 'Bitbucket Pipelines' }
+	{ file: 'bitbucket-pipelines.yml', expectedBadge: 'Bitbucket Pipelines' },
+	{ file: 'bitbucket-advanced.yml', expectedBadge: 'Bitbucket Pipelines' }
 ];
 
 suite('Pipeline Visualizer — sample pipelines', () => {

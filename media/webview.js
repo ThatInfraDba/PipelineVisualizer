@@ -127,6 +127,13 @@
 
         // Delegated handler — CSP blocks inline onclick= so we use data-step attributes
         document.getElementById('content').addEventListener('click', function(e) {
+            const bbTarget = e.target.closest('[data-bb-select]');
+            if (bbTarget && detectedPlatform === 'bitbucket' && pipelineData) {
+                const parts = bbTarget.dataset.bbSelect.split('::');
+                bbSelectedPipeline = { type: parts[0], key: parts.slice(1).join('::') };
+                renderBitbucket(pipelineData);
+                return;
+            }
             const target = e.target.closest('[data-step]');
             if (target) showStepDetails(target.dataset.step);
         });
@@ -218,6 +225,7 @@
                 if (script) html += `<dt>💻 Script</dt><dd><div class="code-block">${escapeHtml(script)}</div></dd>`;
                 if (step.task) html += `<dt>📦 Task</dt><dd>${step.task}</dd>`;
                 if (step.displayName) html += `<dt>📝 Name</dt><dd>${step.displayName}</dd>`;
+                if (step.prompt) html += `<dt>🤖 Agent Prompt</dt><dd><div class="code-block">${escapeHtml(step.prompt)}</div></dd>`;
             }
 
             html += `<dt>🔍 Raw Data</dt><dd><div class="code-block">${escapeHtml(JSON.stringify(step, null, 2))}</div></dd>`;
@@ -895,6 +903,39 @@
 
         let bbSelectedPipeline = null;
 
+        function describeCondition(condition) {
+            if (typeof condition === 'string') { return condition; }
+            const changes = condition && condition.changesets;
+            if (changes) {
+                const parts = [];
+                if (changes.includePaths) { parts.push('changes in ' + asList(changes.includePaths).join(', ')); }
+                if (changes.excludePaths) { parts.push('ignoring ' + asList(changes.excludePaths).join(', ')); }
+                if (parts.length) { return parts.join('; '); }
+            }
+            return JSON.stringify(condition);
+        }
+
+        function describeClone(clone) {
+            if (clone.enabled === false) { return 'disabled'; }
+            const parts = [];
+            if (clone.depth !== undefined) { parts.push('depth ' + clone.depth); }
+            if (clone.lfs) { parts.push('LFS'); }
+            if (clone['skip-ssl-verify']) { parts.push('skip SSL verify'); }
+            return parts.join(', ') || 'default';
+        }
+
+        function describeRuntime(runtime) {
+            const cloud = runtime && runtime.cloud;
+            if (cloud) {
+                const parts = [];
+                if (cloud.arch) { parts.push(String(cloud.arch).toUpperCase()); }
+                if (cloud.version) { parts.push('version ' + cloud.version); }
+                if (cloud.atlassian_ip_ranges) { parts.push('Atlassian IP ranges'); }
+                if (parts.length) { return 'cloud ' + parts.join(', '); }
+            }
+            return JSON.stringify(runtime);
+        }
+
         function renderBitbucket(data) {
             try {
                 if (!data || !data.pipelines) {
@@ -953,6 +994,19 @@
                 }
                 const selectedValue = bbSelectedPipeline.type + '::' + bbSelectedPipeline.key;
 
+                // A pipeline can be imported from another file or repository instead of listing steps
+                const importRef = (activeList && !Array.isArray(activeList) && typeof activeList === 'object' && activeList.import)
+                    ? activeList.import
+                    : null;
+                if (!Array.isArray(activeList)) { activeList = []; }
+                // Custom pipelines can declare run-time variables as a `- variables:` item
+                const pipelineVariables = [];
+                activeList.forEach(function(item) {
+                    if (item && item.variables) { asList(item.variables).forEach(function(v) { pipelineVariables.push(v); }); }
+                });
+                const definitions = data.definitions || {};
+                const agentDefs = (definitions.agents && typeof definitions.agents === 'object') ? definitions.agents : {};
+
                 // Info grid
                 let html = '<div class="info-grid">';
                 html += '<div class="info-card"><h3>📋 Pipeline Types</h3><p>' + Object.keys(pipelines).length + ' configured</p></div>';
@@ -961,8 +1015,28 @@
                     const imgName = typeof data.image === 'string' ? data.image : data.image.name;
                     html += '<div class="info-card"><h3>🐳 Default Image</h3><p>' + escapeHtml(imgName) + '</p></div>';
                 }
-                if (data.definitions && data.definitions.caches) {
-                    html += '<div class="info-card"><h3>💾 Caches</h3><p>' + Object.keys(data.definitions.caches).length + ' defined</p></div>';
+                if (definitions.caches) {
+                    html += '<div class="info-card"><h3>💾 Caches</h3><p>' + Object.keys(definitions.caches).length + ' defined</p></div>';
+                }
+                if (definitions.services) {
+                    html += '<div class="info-card"><h3>🛠️ Services</h3><p>' + escapeHtml(Object.keys(definitions.services).join(', ')) + '</p></div>';
+                }
+                if (Object.keys(agentDefs).length) {
+                    html += '<div class="info-card"><h3>🤖 Agents</h3><p>' + escapeHtml(Object.keys(agentDefs).join(', ')) + '</p></div>';
+                }
+                if (data.triggers && typeof data.triggers === 'object') {
+                    html += '<div class="info-card"><h3>🔔 Triggers</h3><p>' + Object.keys(data.triggers).length + ' event type(s)</p></div>';
+                }
+                if (data.clone) {
+                    html += '<div class="info-card"><h3>📥 Clone</h3><p>' + escapeHtml(describeClone(data.clone)) + '</p></div>';
+                }
+                if (data.options) {
+                    const opts = [];
+                    if (data.options['max-time']) { opts.push('max-time ' + data.options['max-time'] + ' min'); }
+                    if (data.options.size) { opts.push('size ' + data.options.size); }
+                    if (data.options.docker) { opts.push('docker'); }
+                    if (data.options.runtime) { opts.push(describeRuntime(data.options.runtime)); }
+                    html += '<div class="info-card"><h3>⚙️ Options</h3><p>' + escapeHtml(opts.join(', ') || 'Configured') + '</p></div>';
                 }
                 html += '</div>';
 
@@ -976,6 +1050,32 @@
                 });
                 html += '</select>';
                 html += '</div>';
+
+                if (importRef) {
+                    html += '<div class="stage"><h2>📥 Imported Pipeline</h2><div class="job">';
+                    html += '<p><strong>Source:</strong> <code>' + escapeHtml(String(importRef)) + '</code></p>';
+                    html += '<p class="approval-info">ℹ️ Steps are defined in the imported pipeline and are not shown here</p>';
+                    html += '</div></div>';
+                }
+
+                if (pipelineVariables.length) {
+                    html += '<div class="stage"><h2>🔧 Run-time Variables</h2>';
+                    pipelineVariables.forEach(function(v) {
+                        const variable = (v && typeof v === 'object') ? v : { name: String(v) };
+                        html += '<div class="job"><h3><code>' + escapeHtml(String(variable.name || 'variable')) + '</code></h3>';
+                        if (variable.default !== undefined) {
+                            html += '<p><strong>Default:</strong> <code>' + escapeHtml(String(variable.default)) + '</code></p>';
+                        }
+                        if (Array.isArray(variable['allowed-values'])) {
+                            html += '<p><strong>Allowed values:</strong> ' + variable['allowed-values'].map(function(a) { return escapeHtml(String(a)); }).join(', ') + '</p>';
+                        }
+                        if (variable.description) {
+                            html += '<p>' + escapeHtml(String(variable.description)) + '</p>';
+                        }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
 
                 // Build diagram items from active list
                 const diagramItems = [];
@@ -1038,6 +1138,10 @@
                             } else if (entry.agent) {
                                 itemIcon = '🤖';
                                 label = 'agent: ' + String(entry.agent);
+                                const agentDef = agentDefs[entry.agent];
+                                if (agentDef && agentDef.prompt) {
+                                    allSteps[sid] = Object.assign({ displayName: label, prompt: String(agentDef.prompt) }, entry);
+                                }
                             } else {
                                 const firstKey = Object.keys(entry)[0];
                                 const firstValue = firstKey !== undefined ? entry[firstKey] : '';
@@ -1045,7 +1149,7 @@
                                     ? firstKey + ': ' + (typeof firstValue === 'object' ? JSON.stringify(firstValue) : String(firstValue))
                                     : '{}';
                             }
-                            allSteps[sid] = Object.assign({ displayName: label }, entry);
+                            if (!allSteps[sid]) { allSteps[sid] = Object.assign({ displayName: label }, entry); }
                         } else {
                             label = String(entry);
                             allSteps[sid] = { script: label, displayName: label.substring(0, 80) };
@@ -1069,8 +1173,29 @@
                         const imgName = typeof step.image === 'string' ? step.image : step.image.name;
                         out += '<p><strong>🐳 Image:</strong> <code>' + escapeHtml(imgName) + '</code></p>';
                     }
+                    if (step.condition) {
+                        out += '<p><strong>🔀 Condition:</strong> ' + escapeHtml(describeCondition(step.condition)) + '</p>';
+                    }
                     if (step.size) {
                         out += '<p><strong>📐 Size:</strong> ' + escapeHtml(String(step.size)) + '</p>';
+                    }
+                    if (step['runs-on']) {
+                        out += '<p><strong>🖥️ Runs on:</strong> ' + asList(step['runs-on']).map(function(l) { return escapeHtml(String(l)); }).join(', ') + '</p>';
+                    }
+                    if (step.runtime) {
+                        out += '<p><strong>🧬 Runtime:</strong> ' + escapeHtml(describeRuntime(step.runtime)) + '</p>';
+                    }
+                    if (step['max-time']) {
+                        out += '<p><strong>⏱️ Max time:</strong> ' + escapeHtml(String(step['max-time'])) + ' min</p>';
+                    }
+                    if (step.oidc) {
+                        out += '<p><strong>🔐 OIDC:</strong> enabled</p>';
+                    }
+                    if (step.clone) {
+                        out += '<p><strong>📥 Clone:</strong> ' + escapeHtml(describeClone(step.clone)) + '</p>';
+                    }
+                    if (step.auth && step.auth.system && Array.isArray(step.auth.system.scopes)) {
+                        out += '<p><strong>🔑 Auth scopes:</strong> <code>' + step.auth.system.scopes.map(function(sc) { return escapeHtml(String(sc)); }).join(', ') + '</code></p>';
                     }
                     if (step.caches && step.caches.length) {
                         out += '<p><strong>💾 Caches:</strong> ' + step.caches.join(', ') + '</p>';
@@ -1101,6 +1226,9 @@
                         const pSteps = ps.filter(function(p) { return p.step; }).map(function(p) { return p.step; });
                         html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
                         html += '<h2 style="background: ' + color + '; color: white;">⚡ Parallel Steps (' + pSteps.length + ')</h2>';
+                        if (!Array.isArray(item.parallel) && item.parallel['fail-fast']) {
+                            html += '<p class="approval-info">⛔ Fail fast: remaining steps stop when one fails</p>';
+                        }
                         pSteps.forEach(function(step) { html += renderStep(step); });
                         html += '</div>';
                     } else if (item.stage) {
@@ -1108,10 +1236,35 @@
                         const stageName = item.stage.name || ('Stage ' + (node.origIdx + 1));
                         html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
                         html += '<h2 style="background: ' + color + '; color: white;">📋 ' + escapeHtml(stageName) + '</h2>';
+                        if (item.stage.deployment) {
+                            html += '<div class="approval-badge">🚀 Deployment: ' + escapeHtml(String(item.stage.deployment)) + '</div>';
+                        }
+                        if (item.stage.trigger === 'manual') {
+                            html += '<div class="approval-badge" style="background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%);">⏸️ Manual Trigger</div>';
+                        }
+                        if (item.stage.condition) {
+                            html += '<p><strong>🔀 Condition:</strong> ' + escapeHtml(describeCondition(item.stage.condition)) + '</p>';
+                        }
                         stageSteps.forEach(function(step) { html += renderStep(step); });
                         html += '</div>';
                     }
                 });
+
+                if (data.triggers && typeof data.triggers === 'object') {
+                    html += '<div class="stage"><h2>🔔 Triggers</h2>';
+                    Object.entries(data.triggers).forEach(function(triggerEntry) {
+                        html += '<div class="job"><h3><code>' + escapeHtml(triggerEntry[0]) + '</code></h3>';
+                        asList(triggerEntry[1]).forEach(function(rule) {
+                            const r = (rule && typeof rule === 'object') ? rule : {};
+                            const targets = asList(r.pipelines).map(function(name) {
+                                return '<a data-bb-select="' + escapeHtml('custom::' + name) + '" style="cursor:pointer; text-decoration:underline;">⚙️ ' + escapeHtml(String(name)) + '</a>';
+                            }).join(', ');
+                            html += '<p>' + (r.condition ? '<code>' + escapeHtml(String(r.condition)) + '</code>' : '<em>always</em>') + ' → ' + (targets || '<em>no pipelines</em>') + '</p>';
+                        });
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
 
                 // Summary cards for non-default pipeline types
                 const typeLabels = { 'branches': '🌿 Branches', 'pull-requests': '🔀 Pull Requests', 'tags': '🏷️ Tags', 'custom': '⚙️ Custom' };
@@ -1126,7 +1279,10 @@
                         Object.entries(typeObj).forEach(function(entry) {
                             const isSelected = bbSelectedPipeline.type === type && bbSelectedPipeline.key === entry[0];
                             const selectedTag = isSelected ? ' <span style="opacity: 0.7; font-size: 11px;">(viewing)</span>' : '';
-                            html += '<div class="job"><h3><code>' + escapeHtml(entry[0]) + '</code>' + selectedTag + '</h3><p>' + countSteps(entry[1]) + ' step(s)</p></div>';
+                            const summary = (entry[1] && !Array.isArray(entry[1]) && entry[1].import)
+                                ? '📥 Imported from <code>' + escapeHtml(String(entry[1].import)) + '</code>'
+                                : countSteps(entry[1]) + ' step(s)';
+                            html += '<div class="job" data-bb-select="' + escapeHtml(type + '::' + entry[0]) + '" style="cursor:pointer;"><h3><code>' + escapeHtml(entry[0]) + '</code>' + selectedTag + '</h3><p>' + summary + '</p></div>';
                         });
                     }
                     html += '</div>';

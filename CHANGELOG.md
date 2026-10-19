@@ -12,6 +12,15 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **Azure DevOps** — edges from stage `dependsOn`; a stage without `dependsOn` depends on the previous stage and `dependsOn: []` starts immediately
   - **GitLab CI/CD** — when any job uses `needs`, the diagram switches to a job-level graph: `needs` edges, `needs: []` starts immediately, and jobs without `needs` wait for every job in the previous stage. Pipelines without `needs` keep the stage chain
   - **Bitbucket Pipelines** — `parallel` groups fan out into one node per step and join again before the next step (pending since v1.2.0)
+- **Bitbucket Pipelines**
+  - **Triggers** (top-level `triggers:`) — each event type with its `condition` and the custom pipelines it starts; clicking a pipeline switches the selector to it
+  - **Agentic steps** — `definitions.agents` info card, the agent prompt in the `- agent:` step popup, and step `auth.system.scopes`
+  - **Imported pipelines** (`import:`) — shown as a reference card with the source instead of "0 steps"
+  - **Custom pipeline variables** (`- variables:` with `default` / `allowed-values`) in a Run-time Variables section
+  - **Clone and options** — top-level and step `clone` (`depth`, `lfs`, `enabled`, `skip-ssl-verify`), global `options` (`max-time`, `size`, `docker`, `runtime`), and `definitions.services`
+  - **Step and stage settings** — step `condition` (`changesets`), `runs-on`, `runtime.cloud.arch`, `max-time`, `oidc`; stage `deployment`, `trigger: manual`, `condition`; `parallel` `fail-fast`
+  - Pipeline summary cards are clickable and switch the selector
+  - New sample `samples/bitbucket-advanced.yml`
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19
