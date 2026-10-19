@@ -1216,6 +1216,110 @@
             }
         }
 
+        // CloudFormation values may be intrinsic functions; the YAML tags are stripped
+        // before parsing, so `!Ref X` arrives as "X" and long-form functions as objects
+        function cfnValue(value) {
+            if (value === undefined || value === null) { return ''; }
+            if (typeof value !== 'object') { return String(value).trim(); }
+            if (Array.isArray(value)) { return value.map(cfnValue).join(', '); }
+            const keys = Object.keys(value);
+            if (keys.length === 1 && (keys[0] === 'Ref' || keys[0].startsWith('Fn::'))) {
+                return `${keys[0]}(${cfnValue(value[keys[0]])})`;
+            }
+            return JSON.stringify(value);
+        }
+
+        function renderCodePipelineSettings(props) {
+            const rows = [];
+            if (props.PipelineType) { rows.push(`<p><strong>Type:</strong> ${escapeHtml(cfnValue(props.PipelineType))}</p>`); }
+            if (props.ExecutionMode) {
+                const modes = { QUEUED: 'runs wait in a queue', PARALLEL: 'runs proceed in parallel', SUPERSEDED: 'newer runs replace waiting ones' };
+                const mode = cfnValue(props.ExecutionMode);
+                rows.push(`<p><strong>Execution mode:</strong> ${escapeHtml(mode)}${modes[mode] ? ` (${modes[mode]})` : ''}</p>`);
+            }
+            asList(props.Triggers).forEach(trigger => {
+                const git = (trigger && trigger.GitConfiguration) || {};
+                const filters = [];
+                asList(git.Push).forEach(push => filters.push(`push ${describeGitFilter(push)}`));
+                asList(git.PullRequest).forEach(pr => filters.push(`pull request${pr.Events ? ` (${asList(pr.Events).map(cfnValue).join(', ')})` : ''} ${describeGitFilter(pr)}`));
+                rows.push(`<p><strong>🔔 Trigger:</strong> ${escapeHtml(cfnValue(trigger && trigger.ProviderType))}${git.SourceActionName ? ` on <code>${escapeHtml(cfnValue(git.SourceActionName))}</code>` : ''}${filters.length ? ` — ${filters.map(f => escapeHtml(f.trim())).join('; ')}` : ''}</p>`);
+            });
+            if (Array.isArray(props.Variables) && props.Variables.length) {
+                const vars = props.Variables.map(v => `<code>${escapeHtml(cfnValue(v.Name))}</code>${v.DefaultValue !== undefined ? ` = ${escapeHtml(cfnValue(v.DefaultValue))}` : ''}`);
+                rows.push(`<p><strong>🔧 Variables:</strong> ${vars.join(', ')}</p>`);
+            }
+            if (!rows.length) { return ''; }
+            return `<div class="stage"><h2>⚙️ Pipeline Settings</h2><div class="job">${rows.join('')}</div></div>`;
+        }
+
+        function describeGitFilter(filter) {
+            const parts = [];
+            ['Branches', 'FilePaths', 'Tags'].forEach(kind => {
+                const f = filter && filter[kind];
+                if (!f) { return; }
+                if (f.Includes) { parts.push(`${kind.toLowerCase()} ${asList(f.Includes).map(cfnValue).join(', ')}`); }
+                if (f.Excludes) { parts.push(`excluding ${kind.toLowerCase()} ${asList(f.Excludes).map(cfnValue).join(', ')}`); }
+            });
+            return parts.join(', ');
+        }
+
+        function renderStageConditions(title, block) {
+            if (!block) { return ''; }
+            const parts = [];
+            if (block.Result) {
+                const retry = block.RetryConfiguration && block.RetryConfiguration.RetryMode;
+                parts.push(`result <strong>${escapeHtml(cfnValue(block.Result))}</strong>${retry ? ` (retry ${escapeHtml(cfnValue(retry))})` : ''}`);
+            }
+            asList(block.Conditions).forEach(condition => {
+                const rules = asList(condition && condition.Rules).map(rule => {
+                    const provider = rule.RuleTypeId && rule.RuleTypeId.Provider;
+                    return `${escapeHtml(cfnValue(rule.Name))}${provider ? ` (${escapeHtml(cfnValue(provider))})` : ''}`;
+                });
+                parts.push(`${rules.join(', ') || 'condition'} → ${escapeHtml(cfnValue(condition && condition.Result) || 'evaluate')}`);
+            });
+            return `<p class="approval-info">${title}: ${parts.join('; ')}</p>`;
+        }
+
+        function renderCodePipelineAction(action) {
+            const actionName = cfnValue(action.Name) || 'Action';
+            const typeId = action.ActionTypeId || {};
+            const category = cfnValue(typeId.Category);
+            const provider = cfnValue(typeId.Provider);
+            const config = action.Configuration || {};
+            const sid = 'step_' + stepCounter++;
+            allSteps[sid] = {
+                displayName: actionName,
+                category: typeId.Category,
+                provider: typeId.Provider,
+                owner: typeId.Owner,
+                configuration: action.Configuration,
+                runOrder: action.RunOrder,
+                inputArtifacts: action.InputArtifacts,
+                outputArtifacts: action.OutputArtifacts,
+                script: Array.isArray(action.Commands) ? action.Commands.map(cfnValue).join('\n') : undefined
+            };
+            let html;
+            if (category === 'Approval') {
+                html = `<div class="approval" data-step="${sid}" style="cursor:pointer;"><h4>⏸️ Manual Approval: ${escapeHtml(actionName)}</h4>`;
+                if (config.CustomData) { html += `<p><strong>Instructions:</strong> ${escapeHtml(cfnValue(config.CustomData))}</p>`; }
+                if (config.NotificationArn) { html += `<p><strong>Notify:</strong> <code>${escapeHtml(cfnValue(config.NotificationArn))}</code></p>`; }
+                if (config.ExternalEntityLink) { html += `<p><strong>Review link:</strong> <code>${escapeHtml(cfnValue(config.ExternalEntityLink))}</code></p>`; }
+                return html + '</div>';
+            }
+            html = `<div class="job" data-step="${sid}" style="cursor:pointer;">`;
+            html += `<h3>${escapeHtml(actionName)}${provider ? ` (${escapeHtml(provider)})` : ''}</h3>`;
+            if (category) { html += `<p><strong>Category:</strong> ${escapeHtml(category)}</p>`; }
+            if (Array.isArray(action.Commands) && action.Commands.length) {
+                html += '<ul class="steps">';
+                action.Commands.forEach(cmd => { html += `<li style="cursor:default;">▶️ ${escapeHtml(cfnValue(cmd))}</li>`; });
+                html += '</ul>';
+            }
+            if (Array.isArray(action.OutputVariables) && action.OutputVariables.length) {
+                html += `<p><strong>📤 Output variables:</strong> ${action.OutputVariables.map(v => `<code>${escapeHtml(cfnValue(v))}</code>`).join(', ')}</p>`;
+            }
+            return html + '</div>';
+        }
+
         function renderAWSCloudFormation(data) {
             try {
                 const resources = data.Resources || {};
@@ -1242,6 +1346,7 @@
                     var pipelineName = typeof props.Name === 'string' ? props.Name : logicalId;
                     var stages = Array.isArray(props.Stages) ? props.Stages : [];
                     html += '<h3 style="margin-top:24px;font-size:15px;opacity:0.8;">🔀 Pipeline: ' + escapeHtml(pipelineName) + '</h3>';
+                    html += renderCodePipelineSettings(props);
 
                     var stageIds = stages.map(function(stage, sIdx) { return 'CFP' + pIdx + '_' + sIdx; });
                     html += buildFlowchart(stages.map(function(stage, sIdx) {
@@ -1260,17 +1365,25 @@
                         var actions = Array.isArray(stage.Actions) ? stage.Actions : [];
                         html += '<div id="' + sid + '" class="stage" style="border-color:' + color + ';background:linear-gradient(135deg,' + color + '33 0%,' + color + '14 100%);">';
                         html += '<h2 style="background:' + color + ';color:white;">🔀 ' + escapeHtml(stageName) + '</h2>';
+                        html += renderStageConditions('🚪 Before entry', stage.BeforeEntry);
+                        // Actions with the same RunOrder (default 1) run in parallel
+                        var runOrders = [];
+                        var actionsByOrder = {};
                         actions.forEach(function(action) {
-                            var actionName = action.Name || 'Action';
-                            var typeId = action.ActionTypeId || {};
-                            var providerLabel = typeId.Provider ? ' (' + escapeHtml(typeId.Provider) + ')' : '';
-                            var sid2 = 'step_' + stepCounter++;
-                            allSteps[sid2] = { displayName: actionName, category: typeId.Category, provider: typeId.Provider, owner: typeId.Owner, configuration: action.Configuration, runOrder: action.RunOrder, inputArtifacts: action.InputArtifacts, outputArtifacts: action.OutputArtifacts };
-                            html += '<div class="job" data-step="' + sid2 + '" style="cursor:pointer;">';
-                            html += '<h3>' + escapeHtml(actionName) + providerLabel + '</h3>';
-                            if (action.RunOrder) { html += '<p>Run order: ' + action.RunOrder + '</p>'; }
-                            html += '</div>';
+                            var order = Number(action.RunOrder) || 1;
+                            if (!actionsByOrder[order]) { actionsByOrder[order] = []; runOrders.push(order); }
+                            actionsByOrder[order].push(action);
                         });
+                        runOrders.sort(function(a, b) { return a - b; });
+                        runOrders.forEach(function(order) {
+                            var group = actionsByOrder[order];
+                            if (runOrders.length > 1 || group.length > 1) {
+                                html += '<p><strong>Run order ' + order + '</strong>' + (group.length > 1 ? ' — ' + group.length + ' actions in parallel' : '') + '</p>';
+                            }
+                            group.forEach(function(action) { html += renderCodePipelineAction(action); });
+                        });
+                        html += renderStageConditions('✅ On success', stage.OnSuccess);
+                        html += renderStageConditions('❌ On failure', stage.OnFailure);
                         html += '</div>';
                     });
                 });

@@ -39,6 +39,14 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **Reports** — each report group with its `file-format`, `files`, `base-directory`
   - Runtime versions accept lists and are HTML-escaped
   - New sample `samples/codebuild-batch.yml`
+- **AWS CodePipeline (CloudFormation)**
+  - **Parallel actions** — actions are grouped by `RunOrder` (default 1); actions sharing a run order are marked as running in parallel
+  - **V2 pipelines** — Pipeline Settings section with `PipelineType`, `ExecutionMode` (QUEUED / PARALLEL / SUPERSEDED), Git `Triggers` (push / pull request filters on branches, file paths, tags) and pipeline `Variables`
+  - **Stage conditions** — `BeforeEntry`, `OnSuccess` and `OnFailure` with their rules and results, including rollback and retry mode
+  - **Commands actions** (Compute / `Commands`) list their commands and `OutputVariables`; commands are also in the action popup
+  - **Manual approval actions** (`Category: Approval`) render as approval gates with `CustomData`, `NotificationArn` and `ExternalEntityLink`
+  - Long-form intrinsic functions (`Ref`, `Fn::*`) display as `Ref(X)` / `Fn::GetAtt(...)` instead of `[object Object]`
+  - New sample `samples/codepipeline-v2.yaml`
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19

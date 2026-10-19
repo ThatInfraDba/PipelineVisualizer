@@ -154,6 +154,49 @@ suite('AWS CodeBuild features', () => {
 	});
 });
 
+suite('AWS CodePipeline (CloudFormation) features', () => {
+	const sample = readSample('codepipeline-v2.yaml');
+
+	test('shows V2 pipeline settings', () => {
+		const html = renderInWebview('aws-cloudformation', sample);
+		assertRendered(html);
+		assertIncludesAll(html, [
+			'⚙️ Pipeline Settings',
+			'Type:</strong> V2',
+			'QUEUED (runs wait in a queue)',
+			'CodeStarSourceConnection on <code>Source</code>',
+			'push branches main, excluding filepaths docs/**',
+			'pull request (OPEN, UPDATED) branches main',
+			'<code>DeployRegion</code> = eu-west-1'
+		]);
+	});
+
+	test('groups actions by RunOrder and renders Commands and Approval actions', () => {
+		const html = renderInWebview('aws-cloudformation', sample);
+		assertIncludesAll(html, [
+			'Run order 1</strong> — 2 actions in parallel',
+			'Run order 2</strong>',
+			'Lint (Commands)',
+			'▶️ npm run lint',
+			'<code>LINT_RESULT</code>',
+			'⏸️ Manual Approval: ProductionApproval',
+			'Check the staging dashboard before approving',
+			'<code>ApprovalTopic</code>'
+		]);
+		assert.ok(html.indexOf('UnitTests') < html.indexOf('Package'), 'Expected RunOrder 1 before RunOrder 2');
+	});
+
+	test('shows stage conditions', () => {
+		const html = renderInWebview('aws-cloudformation', sample);
+		assertIncludesAll(html, [
+			'❌ On failure: result <strong>RETRY</strong> (retry FAILED_ACTIONS)',
+			'🚪 Before entry: NoActiveAlarms (CloudWatchAlarm) → FAIL',
+			'❌ On failure: result <strong>ROLLBACK</strong>',
+			'✅ On success: PostDeployCheck (CloudWatchAlarm) → ROLLBACK'
+		]);
+	});
+});
+
 suite('Bitbucket Pipelines features', () => {
 	const sample = readSample('bitbucket-advanced.yml');
 
