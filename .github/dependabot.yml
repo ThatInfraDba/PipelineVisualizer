@@ -13,6 +13,15 @@ updates:
       typescript-eslint:
         patterns:
           - "@typescript-eslint/*"
+          - "typescript-eslint"
+    ignore:
+      # @types/vscode must not exceed engines.vscode or vsce refuses to package;
+      # bump it together with engines.vscode deliberately, not via Dependabot
+      - dependency-name: "@types/vscode"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+      # typescript-eslint does not support TypeScript 7 yet (peer: <6.1.0)
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

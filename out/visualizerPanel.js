@@ -321,7 +321,7 @@ class PipelineVisualizerPanel {
     }
     _getHtmlForWebview(webview, pipelineData, layoutPreference, colorTheme, fileName = '') {
         const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'webview.js'));
-        const jsYamlUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'js-yaml', 'dist', 'js-yaml.min.js'));
+        const jsYamlUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'js-yaml', 'dist', 'browser', 'js-yaml.umd.min.js'));
         const platform = this._detectPlatform(pipelineData, fileName);
         const platformClass = platform === 'github' ? 'github-mode' : '';
         const platformBadge = platform === 'github'

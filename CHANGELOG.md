@@ -2,7 +2,22 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
-## [Unreleased]
+## [1.4.0] - 2026-10-19
+
+Rolls up all open Dependabot PRs (#13, #20, #22, #23, #24, #26, #27) into a single release and fixes the CI failure they all shared.
+
+### Security
+- Ran `npm audit fix` — updates transitive `brace-expansion` (GHSA-q2hr-2g5m-vwhr, GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p) and `serialize-javascript` (GHSA-gfhx-hw2g-v5hg). These advisories made the CI `npm audit --audit-level=high` step fail on every open Dependabot PR
+
+### Changed
+- Bumped `js-yaml` (4.3.2 → 5.5.0). v5 ships its own type definitions (dropped `@types/js-yaml`) and moved the browser bundle, so the webview now loads `node_modules/js-yaml/dist/browser/js-yaml.umd.min.js`
+- Bumped `eslint` (8.57.1 → 10.13.0) and migrated from `.eslintrc.json` to flat config (`eslint.config.mjs`, using `@eslint/js` + `typescript-eslint`); `--ext` flag removed from the lint script
+- Bumped `@typescript-eslint/eslint-plugin` / `@typescript-eslint/parser` (8.70.0 → 8.71.2)
+- Bumped `typescript` (5.9.3 → 6.0.3) and set `types: ["node", "mocha"]` in `tsconfig.json` (TypeScript 6 no longer includes all `@types/*` by default). TypeScript 7 is not adopted yet — `typescript-eslint` only supports `<6.1.0`
+- Bumped `mocha` (12.0.0 → 12.0.3), `@types/node` (20 → 26.6.5)
+- `@types/vscode` lockfile updated to 1.140.0 while keeping the declared range at `^1.85.0` — raising the range above `engines.vscode` makes `vsce` refuse to package
+- CI and release workflows now run on Node 24 (Node 20 is end-of-life)
+- Dependabot: `typescript-eslint` added to the typescript-eslint group; minor/major `@types/vscode` and major `typescript` updates are ignored for the reasons above
 
 ### Added
 - **VS Code integration test suite** — `@vscode/test-electron` + Mocha now drive the real `pipelineVisualizer.visualize` command against every sample pipeline (Azure DevOps, GitHub Actions, GitLab CI, AWS CodeBuild, AWS CloudFormation, Bitbucket Pipelines x2), asserting the correct platform badge renders and no error is shown. A negative test confirms invalid YAML is handled gracefully. Run via `npm test`; CI runs it headless via `xvfb-run`
