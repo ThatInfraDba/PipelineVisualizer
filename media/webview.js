@@ -127,6 +127,13 @@
 
         // Delegated handler — CSP blocks inline onclick= so we use data-step attributes
         document.getElementById('content').addEventListener('click', function(e) {
+            const bbTarget = e.target.closest('[data-bb-select]');
+            if (bbTarget && detectedPlatform === 'bitbucket' && pipelineData) {
+                const parts = bbTarget.dataset.bbSelect.split('::');
+                bbSelectedPipeline = { type: parts[0], key: parts.slice(1).join('::') };
+                renderBitbucket(pipelineData);
+                return;
+            }
             const target = e.target.closest('[data-step]');
             if (target) showStepDetails(target.dataset.step);
         });
@@ -135,6 +142,71 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function chooseDirection(depth) {
+            if (layoutPreference === 'horizontal') { return 'LR'; }
+            if (layoutPreference === 'vertical') { return 'TD'; }
+            return depth <= 6 ? 'LR' : 'TD';
+        }
+
+        // Builds a Mermaid flowchart from nodes and dependency edges. Nodes without
+        // incoming edges start from START and nodes without outgoing edges lead to END,
+        // so independent nodes render as parallel branches.
+        // nodes: [{ id, label, color, scrollTo }]; edges: [[fromId, toId]]
+        function buildFlowchart(nodes, edges) {
+            const ids = new Set(nodes.map(n => n.id));
+            const seen = new Set();
+            const uniqueEdges = edges.filter(([from, to]) => {
+                const key = from + '>' + to;
+                if (!ids.has(from) || !ids.has(to) || from === to || seen.has(key)) { return false; }
+                seen.add(key);
+                return true;
+            });
+            const hasIncoming = new Set(uniqueEdges.map(e => e[1]));
+            const hasOutgoing = new Set(uniqueEdges.map(e => e[0]));
+
+            // Longest path picks the layout direction; capped iterations tolerate cycles
+            const depth = {};
+            nodes.forEach(n => { depth[n.id] = 1; });
+            for (let i = 0; i < nodes.length; i++) {
+                let changed = false;
+                uniqueEdges.forEach(([from, to]) => {
+                    if (depth[to] < depth[from] + 1) { depth[to] = depth[from] + 1; changed = true; }
+                });
+                if (!changed) { break; }
+            }
+            const maxDepth = nodes.reduce((m, n) => Math.max(m, depth[n.id]), 0);
+
+            let diagram = `graph ${chooseDirection(maxDepth)}\nSTART([Start])`;
+            nodes.forEach(n => { diagram += `\n${n.id}["${String(n.label).replace(/"/g, "'")}"]`; });
+            diagram += '\nEND([End])';
+            if (!nodes.length) { diagram += '\nSTART --> END'; }
+            nodes.forEach(n => { if (!hasIncoming.has(n.id)) { diagram += `\nSTART --> ${n.id}`; } });
+            uniqueEdges.forEach(([from, to]) => { diagram += `\n${from} --> ${to}`; });
+            nodes.forEach(n => { if (!hasOutgoing.has(n.id)) { diagram += `\n${n.id} --> END`; } });
+            nodes.forEach(n => {
+                diagram += `\nstyle ${n.id} fill:${n.color},stroke:${n.color},color:#fff`;
+                if (n.scrollTo) {
+                    const handler = 'pvScrollTo_' + n.id;
+                    window[handler] = function() { scrollToStage(n.scrollTo); };
+                    diagram += `\nclick ${n.id} ${handler}`;
+                }
+            });
+            diagram += `\nlinkStyle default stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
+            return `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+        }
+
+        // Sequential nodes: each one depends on the previous
+        function chainEdges(ids) {
+            const edges = [];
+            for (let i = 1; i < ids.length; i++) { edges.push([ids[i - 1], ids[i]]); }
+            return edges;
+        }
+
+        function asList(value) {
+            if (value === undefined || value === null) { return []; }
+            return Array.isArray(value) ? value : [value];
         }
 
         function showStepDetails(stepId) {
@@ -148,11 +220,14 @@
                 if (step.name) html += `<dt>📝 Name</dt><dd>${step.name}</dd>`;
                 if (step.uses) html += `<dt>🔧 Uses</dt><dd><code>${step.uses}</code></dd>`;
                 if (step.run) html += `<dt>💻 Script</dt><dd><div class="code-block">${escapeHtml(step.run)}</div></dd>`;
+                if (step.if !== undefined) html += `<dt>🔀 Condition</dt><dd><code>${escapeHtml(String(step.if))}</code></dd>`;
+                if (step.with) html += `<dt>⚙️ With</dt><dd><div class="code-block">${escapeHtml(JSON.stringify(step.with, null, 2))}</div></dd>`;
             } else {
                 const script = step.script || step.pwsh || step.bash || step.powershell || (step.inputs && step.inputs.script);
                 if (script) html += `<dt>💻 Script</dt><dd><div class="code-block">${escapeHtml(script)}</div></dd>`;
                 if (step.task) html += `<dt>📦 Task</dt><dd>${step.task}</dd>`;
                 if (step.displayName) html += `<dt>📝 Name</dt><dd>${step.displayName}</dd>`;
+                if (step.prompt) html += `<dt>🤖 Agent Prompt</dt><dd><div class="code-block">${escapeHtml(step.prompt)}</div></dd>`;
             }
 
             html += `<dt>🔍 Raw Data</dt><dd><div class="code-block">${escapeHtml(JSON.stringify(step, null, 2))}</div></dd>`;
@@ -193,6 +268,154 @@
             initAndRender();
         }
 
+        function azureStepLabel(step) {
+            if (step.displayName) { return step.displayName; }
+            if (step.template) { return `📄 template: ${step.template}`; }
+            const script = step.script || step.bash || step.pwsh || step.powershell;
+            if (script) { return String(script).substring(0, 50); }
+            if (step.task) { return step.task; }
+            for (const shortcut of ['checkout', 'download', 'downloadBuild', 'publish', 'getPackage', 'reviewApp']) {
+                if (step[shortcut] !== undefined) { return `${shortcut}: ${step[shortcut]}`; }
+            }
+            return 'Step';
+        }
+
+        function renderAzureSteps(steps, icon) {
+            if (!Array.isArray(steps) || !steps.length) { return ''; }
+            let html = '<ul class="steps">';
+            steps.forEach(step => {
+                const s = step || {};
+                const sid = `step_${stepCounter++}`;
+                allSteps[sid] = s;
+                const condition = s.condition ? ` <span style="opacity: 0.7; font-size: 11px;">if ${escapeHtml(String(s.condition))}</span>` : '';
+                html += `<li data-step="${sid}" style="cursor:pointer;">${icon || '▶️'} ${escapeHtml(String(azureStepLabel(s)))}${condition}</li>`;
+            });
+            return html + '</ul>';
+        }
+
+        function renderAzureTemplateRef(item) {
+            if (!item.template) { return ''; }
+            let html = `<p><strong>📄 Template:</strong> <code>${escapeHtml(String(item.template))}</code></p>`;
+            if (isPlainObject(item.parameters)) {
+                html += `<p><strong>Parameters:</strong> ${Object.entries(item.parameters).map(([k, v]) => `<code>${escapeHtml(k)}</code> = ${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}`).join(', ')}</p>`;
+            }
+            return html + '<p class="approval-info">ℹ️ Template contents are defined in another file and are not shown here</p>';
+        }
+
+        function renderAzurePipelineSettings(data) {
+            let html = '';
+            if (isPlainObject(data.extends) && data.extends.template) {
+                html += `<div class="job"><h3>🧬 Extends</h3>${renderAzureTemplateRef(data.extends)}</div>`;
+            }
+            if (Array.isArray(data.parameters) && data.parameters.length) {
+                html += '<div class="job"><h3>⚙️ Parameters</h3><ul class="rules">';
+                data.parameters.forEach(p => {
+                    const param = p || {};
+                    const parts = [];
+                    if (param.type) { parts.push(escapeHtml(String(param.type))); }
+                    if (param.default !== undefined) { parts.push(`default <code>${escapeHtml(typeof param.default === 'object' ? JSON.stringify(param.default) : String(param.default))}</code>`); }
+                    if (Array.isArray(param.values)) { parts.push(`values ${param.values.map(v => escapeHtml(String(v))).join(', ')}`); }
+                    html += `<li><code>${escapeHtml(String(param.name))}</code>${param.displayName ? ` (${escapeHtml(String(param.displayName))})` : ''}${parts.length ? ` — ${parts.join(', ')}` : ''}</li>`;
+                });
+                html += '</ul></div>';
+            }
+            if (isPlainObject(data.resources)) {
+                html += '<div class="job"><h3>📚 Resources</h3><ul class="rules">';
+                Object.entries(data.resources).forEach(([kind, entries]) => {
+                    asList(entries).forEach(entry => {
+                        const e = entry || {};
+                        const alias = e.repository || e.pipeline || e.container || e.build || e.package || e.webhook || '';
+                        const source = e.name || e.source || e.image || e.project || '';
+                        html += `<li>${escapeHtml(kind)}: <code>${escapeHtml(String(alias))}</code>${source ? ` → ${escapeHtml(String(source))}` : ''}${e.ref ? ` @ ${escapeHtml(String(e.ref))}` : ''}${e.trigger ? ' (triggers this pipeline)' : ''}</li>`;
+                    });
+                });
+                html += '</ul></div>';
+            }
+            return html ? `<div class="stage"><h2>⚙️ Pipeline Configuration</h2>${html}</div>` : '';
+        }
+
+        function renderAzureStageSettings(stage) {
+            let html = '';
+            if (stage.trigger === 'manual') {
+                html += '<div class="approval-badge" style="background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%);">⏸️ Manual Stage</div>';
+            }
+            if (stage.dependsOn !== undefined) {
+                const deps = asList(stage.dependsOn);
+                html += `<p><strong>⛓️ Depends on:</strong> ${deps.length ? deps.map(d => `<code>${escapeHtml(String(d))}</code>`).join(', ') : '<em>nothing (runs immediately)</em>'}</p>`;
+            }
+            if (stage.condition) { html += `<p><strong>🔀 Condition:</strong> <code>${escapeHtml(String(stage.condition))}</code></p>`; }
+            if (stage.isSkippable === false) { html += '<p class="approval-info">🔒 Cannot be skipped at queue time</p>'; }
+            if (stage.lockBehavior) { html += `<p><strong>🔒 Lock behavior:</strong> ${escapeHtml(String(stage.lockBehavior))}</p>`; }
+            if (stage.pool) {
+                const poolName = typeof stage.pool === 'string' ? stage.pool : (stage.pool.vmImage || stage.pool.name);
+                if (poolName) { html += `<p><strong>🖥️ Pool:</strong> ${escapeHtml(String(poolName))}</p>`; }
+            }
+            return html;
+        }
+
+        function renderAzureJobSettings(job) {
+            let html = '';
+            if (job.dependsOn !== undefined) {
+                const deps = asList(job.dependsOn);
+                html += `<p><strong>⛓️ Depends on:</strong> ${deps.length ? deps.map(d => `<code>${escapeHtml(String(d))}</code>`).join(', ') : '<em>nothing</em>'}</p>`;
+            }
+            if (job.condition) { html += `<p><strong>🔀 Condition:</strong> <code>${escapeHtml(String(job.condition))}</code></p>`; }
+            if (job.pool && job.pool !== 'server') {
+                const poolName = typeof job.pool === 'string' ? job.pool : (job.pool.vmImage || job.pool.name);
+                if (poolName) { html += `<p><strong>🖥️ Pool:</strong> ${escapeHtml(String(poolName))}</p>`; }
+            }
+            if (job.container) {
+                const image = isPlainObject(job.container) ? (job.container.image || job.container.alias) : job.container;
+                html += `<p><strong>🐳 Container:</strong> <code>${escapeHtml(String(image))}</code></p>`;
+            }
+            if (isPlainObject(job.services)) {
+                html += `<p><strong>🛠️ Services:</strong> ${Object.entries(job.services).map(([name, svc]) => `<code>${escapeHtml(name)}</code>${typeof svc === 'string' ? ` (${escapeHtml(svc)})` : ''}`).join(', ')}</p>`;
+            }
+            // Regular jobs: matrix / parallel strategy (deployment strategies are rendered separately)
+            const strategy = job.strategy;
+            if (isPlainObject(strategy) && !job.deployment) {
+                if (isPlainObject(strategy.matrix)) {
+                    html += `<p><strong>🔢 Matrix:</strong> ${Object.keys(strategy.matrix).map(k => `<code>${escapeHtml(k)}</code>`).join(', ')} (${Object.keys(strategy.matrix).length} job(s))</p>`;
+                } else if (strategy.matrix !== undefined) {
+                    html += `<p><strong>🔢 Matrix:</strong> <code>${escapeHtml(String(strategy.matrix))}</code></p>`;
+                }
+                if (strategy.parallel !== undefined) { html += `<p><strong>🔀 Parallel:</strong> ${escapeHtml(String(strategy.parallel))} agents</p>`; }
+                if (strategy.maxParallel !== undefined) { html += `<p><strong>Max parallel:</strong> ${escapeHtml(String(strategy.maxParallel))}</p>`; }
+            }
+            if (job.timeoutInMinutes !== undefined) { html += `<p><strong>⏱️ Timeout:</strong> ${escapeHtml(String(job.timeoutInMinutes))} min</p>`; }
+            if (job.continueOnError) { html += '<p class="approval-info">ℹ️ Continue on error</p>'; }
+            return html;
+        }
+
+        // Deployment jobs keep their steps in lifecycle hooks under strategy.runOnce / rolling / canary
+        function renderAzureDeploymentStrategy(job) {
+            if (!job.deployment || !isPlainObject(job.strategy)) { return ''; }
+            const HOOKS = [['preDeploy', '🔧'], ['deploy', '🚀'], ['routeTraffic', '🔀'], ['postRouteTraffic', '✅']];
+            let html = '';
+            ['runOnce', 'rolling', 'canary'].forEach(kind => {
+                const strategy = job.strategy[kind];
+                if (!isPlainObject(strategy)) { return; }
+                html += `<p><strong>📋 Strategy:</strong> ${kind}`;
+                if (kind === 'rolling' && strategy.maxParallel !== undefined) { html += ` (max parallel ${escapeHtml(String(strategy.maxParallel))})`; }
+                if (kind === 'canary' && strategy.increments) { html += ` (increments ${escapeHtml(asList(strategy.increments).join('%, '))}%)`; }
+                html += '</p>';
+                HOOKS.forEach(([hook, icon]) => {
+                    const steps = strategy[hook] && strategy[hook].steps;
+                    if (Array.isArray(steps) && steps.length) {
+                        html += `<h4>${icon} ${hook}</h4>${renderAzureSteps(steps)}`;
+                    }
+                });
+                const on = strategy.on || {};
+                [['success', '🎉'], ['failure', '🧯']].forEach(([outcome, icon]) => {
+                    const steps = on[outcome] && on[outcome].steps;
+                    if (Array.isArray(steps) && steps.length) {
+                        html += `<h4>${icon} on ${outcome}</h4>${renderAzureSteps(steps)}`;
+                    }
+                });
+            });
+            return html;
+        }
+
         function renderAzure(data) {
             try {
                 if (!data) {
@@ -215,48 +438,50 @@
                 html += '<div class="info-card"><h3>🖥️ Pool</h3><p>' + escapeHtml(String(poolName)) + '</p></div>';
             }
             if (data.stages) html += `<div class="info-card"><h3>📊 Stages</h3><p>${data.stages.length}</p></div>`;
+            if (data.parameters) html += `<div class="info-card"><h3>⚙️ Parameters</h3><p>${asList(data.parameters).length} defined</p></div>`;
+            if (data.variables) {
+                const variableCount = Array.isArray(data.variables) ? data.variables.length : Object.keys(data.variables).length;
+                html += `<div class="info-card"><h3>🔧 Variables</h3><p>${variableCount} entr${variableCount === 1 ? 'y' : 'ies'}</p></div>`;
+            }
+            if (data.resources) html += `<div class="info-card"><h3>📚 Resources</h3><p>${escapeHtml(Object.keys(data.resources).join(', '))}</p></div>`;
             html += '</div>';
+            html += renderAzurePipelineSettings(data);
 
-            let diagramDirection = 'TD';
-            if (layoutPreference === 'horizontal') {
-                diagramDirection = 'LR';
-            } else if (layoutPreference === 'vertical') {
-                diagramDirection = 'TD';
-            } else {
-                diagramDirection = (data.stages && data.stages.length <= 6) ? 'LR' : 'TD';
-            }
-            let diagram = `graph ${diagramDirection}\nSTART([Start])`;
             const stageColors = themePalette;
-            if (data.stages) {
-                data.stages.forEach((stage, idx) => {
-                    const id = `S${idx}`;
-                    const stageLabel = (stage.displayName || stage.stage || 'Stage').replace(/"/g, "'");
-                    diagram += ` --> ${id}["${stageLabel}"]`;
-                });
-            }
-            diagram += ' --> END([End])';
-            if (data.stages) {
-                data.stages.forEach((stage, idx) => {
-                    const id = `S${idx}`;
-                    const color = stageColors[idx % stageColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToStage_${idx}`;
-                    window[`scrollToStage_${idx}`] = function() { scrollToStage(`S${idx}`); };
-                });
-            }
-            const edgeCount = (data.stages ? data.stages.length : 0) + 1;
-            for (let i = 0; i < edgeCount; i++) {
-                diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
-            }
-            html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+            const stages = Array.isArray(data.stages) ? data.stages : [];
+            const stageIdByName = {};
+            stages.forEach((stage, idx) => { if (stage.stage) { stageIdByName[stage.stage] = `S${idx}`; } });
+            // Stages depend on the previous stage unless `dependsOn` says otherwise (`[]` = no dependencies)
+            const stageEdges = [];
+            stages.forEach((stage, idx) => {
+                if (stage.dependsOn === undefined) {
+                    if (idx > 0) { stageEdges.push([`S${idx - 1}`, `S${idx}`]); }
+                } else {
+                    asList(stage.dependsOn).forEach(dep => {
+                        if (stageIdByName[dep]) { stageEdges.push([stageIdByName[dep], `S${idx}`]); }
+                    });
+                }
+            });
+            html += buildFlowchart(stages.map((stage, idx) => ({
+                id: `S${idx}`,
+                label: stage.displayName || stage.stage || (stage.template ? `template: ${stage.template}` : 'Stage'),
+                color: stageColors[idx % stageColors.length],
+                scrollTo: `S${idx}`
+            })), stageEdges);
 
             if (data.stages) {
                 data.stages.forEach((stage, idx) => {
                     const color = stageColors[idx % stageColors.length];
-                    html += `<div id="S${idx}" class="stage" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="background: ${color}; color: white;">🔨 ${stage.displayName || stage.stage}</h2>`;
+                    html += `<div id="S${idx}" class="stage" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="background: ${color}; color: white;">🔨 ${escapeHtml(String(stage.displayName || stage.stage || (stage.template ? 'Template' : 'Stage')))}</h2>`;
+                    html += renderAzureTemplateRef(stage);
+                    html += renderAzureStageSettings(stage);
                     if (stage.jobs) {
                         stage.jobs.forEach((job, jidx) => {
                             try {
+                                if (job.template) {
+                                    html += `<div class="job"><h3>📄 Job template</h3>${renderAzureTemplateRef(job)}</div>`;
+                                    return;
+                                }
                                 const isManualValidation = job.steps && job.steps.some(step =>
                                     step.task && (step.task.includes('ManualValidation') || step.task.includes('ManualIntervention'))
                                 );
@@ -294,7 +519,8 @@
 
                                     html += '</div>';
                                 } else {
-                                    html += `<div class="job"><h3>${job.displayName || job.job}</h3>`;
+                                    html += `<div class="job"><h3>${escapeHtml(String(job.displayName || job.job || job.deployment || 'Job'))}</h3>`;
+                                    html += renderAzureJobSettings(job);
 
                                     if (job.deployment) {
                                         html += `<div class="approval-badge">🔒 Deployment Job</div>`;
@@ -305,20 +531,13 @@
                                         }
                                     }
 
-                                    if (job.steps) {
-                                        html += '<ul class="steps">';
-                                        job.steps.forEach(step => {
-                                            const sid = `step_${stepCounter++}`;
-                                            allSteps[sid] = step;
-                                            html += `<li data-step="${sid}" style="cursor:pointer;">▶️ ${step.displayName || step.script?.substring(0, 50) || step.task || 'Step'}</li>`;
-                                        });
-                                        html += '</ul>';
-                                    }
+                                    html += renderAzureSteps(job.steps);
+                                    html += renderAzureDeploymentStrategy(job);
                                     html += '</div>';
                                 }
                             } catch (jobError) {
                                 console.error('Error rendering job:', jobError, job);
-                                html += `<div class="job"><h3>${job.displayName || job.job}</h3><p style="color: red;">Error rendering job</p></div>`;
+                                html += `<div class="job"><h3>${escapeHtml(String(job.displayName || job.job || job.deployment || 'Job'))}</h3><p style="color: red;">Error rendering job</p></div>`;
                             }
                         });
                     }
@@ -331,6 +550,127 @@
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render Azure pipeline visualization.', '<strong>Tip:</strong> There may be an issue with the pipeline structure. Please check your YAML file.');
             }
+        }
+
+        function describeRunsOn(runsOn) {
+            if (isPlainObject(runsOn)) {
+                const parts = [];
+                if (runsOn.group) { parts.push(`group ${runsOn.group}`); }
+                if (runsOn.labels) { parts.push(asList(runsOn.labels).join(', ')); }
+                return parts.join(' · ') || JSON.stringify(runsOn);
+            }
+            return asList(runsOn).join(', ');
+        }
+
+        function describeConcurrency(concurrency) {
+            if (!isPlainObject(concurrency)) { return String(concurrency); }
+            return `${concurrency.group}${concurrency['cancel-in-progress'] ? ' (cancels in-progress runs)' : ''}`;
+        }
+
+        function describePermissions(permissions) {
+            if (!isPlainObject(permissions)) { return String(permissions); }
+            const entries = Object.entries(permissions);
+            return entries.length ? entries.map(([scope, level]) => `${scope}: ${level}`).join(', ') : 'none';
+        }
+
+        function renderGitHubInputs(inputs) {
+            if (!isPlainObject(inputs)) { return ''; }
+            return '<ul class="rules">' + Object.entries(inputs).map(([name, def]) => {
+                const d = isPlainObject(def) ? def : {};
+                const parts = [];
+                if (d.type) { parts.push(escapeHtml(String(d.type))); }
+                if (d.required) { parts.push('required'); }
+                if (d.default !== undefined) { parts.push(`default <code>${escapeHtml(String(d.default))}</code>`); }
+                if (Array.isArray(d.options)) { parts.push(`options ${d.options.map(o => escapeHtml(String(o))).join(', ')}`); }
+                return `<li><code>${escapeHtml(name)}</code>${parts.length ? ` — ${parts.join(', ')}` : ''}${d.description ? `<br><span style="opacity: 0.8;">${escapeHtml(String(d.description))}</span>` : ''}</li>`;
+            }).join('') + '</ul>';
+        }
+
+        // Details for triggers that carry configuration: schedules, branch/path filters, inputs
+        function renderGitHubTriggers(on) {
+            if (!isPlainObject(on)) { return ''; }
+            let html = '';
+            Object.entries(on).forEach(([event, config]) => {
+                if (event === 'schedule') {
+                    asList(config).forEach(entry => {
+                        const e = entry || {};
+                        html += `<p><strong>⏰ schedule:</strong> <code>${escapeHtml(String(e.cron))}</code>${e.timezone ? ` (${escapeHtml(String(e.timezone))})` : ' (UTC)'}</p>`;
+                    });
+                    return;
+                }
+                if (!isPlainObject(config)) { return; }
+                const filters = [];
+                ['branches', 'branches-ignore', 'tags', 'tags-ignore', 'paths', 'paths-ignore', 'types', 'workflows'].forEach(k => {
+                    if (config[k]) { filters.push(`${k}: ${asList(config[k]).join(', ')}`); }
+                });
+                if (filters.length) {
+                    html += `<p><strong>${escapeHtml(event)}:</strong> ${escapeHtml(filters.join(' · '))}</p>`;
+                }
+                if (config.inputs) {
+                    html += `<p><strong>${escapeHtml(event)} inputs:</strong></p>${renderGitHubInputs(config.inputs)}`;
+                }
+                if (isPlainObject(config.secrets)) {
+                    html += `<p><strong>${escapeHtml(event)} secrets:</strong> ${Object.keys(config.secrets).map(s => `<code>${escapeHtml(s)}</code>`).join(', ')}</p>`;
+                }
+                if (isPlainObject(config.outputs)) {
+                    html += `<p><strong>${escapeHtml(event)} outputs:</strong> ${Object.keys(config.outputs).map(o => `<code>${escapeHtml(o)}</code>`).join(', ')}</p>`;
+                }
+            });
+            return html ? `<div class="stage"><h2>🔔 Triggers</h2><div class="job">${html}</div></div>` : '';
+        }
+
+        function describeGitHubService(name, service) {
+            if (!isPlainObject(service)) { return `<code>${escapeHtml(name)}</code>`; }
+            const parts = [];
+            if (service.image) { parts.push(`<code>${escapeHtml(String(service.image))}</code>`); }
+            if (service.ports) { parts.push(`ports ${escapeHtml(asList(service.ports).join(', '))}`); }
+            if (service.entrypoint) { parts.push(`entrypoint <code>${escapeHtml(String(service.entrypoint))}</code>`); }
+            if (service.command) { parts.push(`command <code>${escapeHtml(asList(service.command).join(' '))}</code>`); }
+            return `<code>${escapeHtml(name)}</code>${parts.length ? ` (${parts.join(', ')})` : ''}`;
+        }
+
+        function renderGitHubJobSettings(job) {
+            let html = '';
+            if (job.if !== undefined) { html += `<p><strong>🔀 Condition:</strong> <code>${escapeHtml(String(job.if))}</code></p>`; }
+            if (job.strategy) {
+                const strategy = job.strategy;
+                const matrix = strategy.matrix;
+                if (isPlainObject(matrix)) {
+                    const dims = Object.entries(matrix).filter(([k]) => k !== 'include' && k !== 'exclude');
+                    const combos = dims.length ? dims.reduce((total, [, v]) => total * (Array.isArray(v) ? v.length : 1), 1) : 0;
+                    const excluded = asList(matrix.exclude).length;
+                    const included = asList(matrix.include).length;
+                    html += `<p><strong>🔢 Matrix:</strong> ${escapeHtml(dims.map(([k, v]) => `${k}: ${Array.isArray(v) ? v.map(x => typeof x === 'object' ? JSON.stringify(x) : x).join(' | ') : v}`).join(' × ') || 'dynamic')}</p>`;
+                    const summary = [];
+                    if (dims.length && dims.every(([, v]) => Array.isArray(v))) { summary.push(`${Math.max(combos - excluded, 0)} combination(s)`); }
+                    if (included) { summary.push(`+${included} include`); }
+                    if (excluded) { summary.push(`${excluded} exclude`); }
+                    if (summary.length) { html += `<p style="opacity: 0.8;">${escapeHtml(summary.join(', '))}</p>`; }
+                } else if (matrix !== undefined) {
+                    html += `<p><strong>🔢 Matrix:</strong> <code>${escapeHtml(String(matrix))}</code></p>`;
+                }
+                const options = [];
+                if (strategy['fail-fast'] !== undefined) { options.push(`fail-fast: ${strategy['fail-fast']}`); }
+                if (strategy['max-parallel'] !== undefined) { options.push(`max-parallel: ${strategy['max-parallel']}`); }
+                if (options.length) { html += `<p>${escapeHtml(options.join(' · '))}</p>`; }
+            }
+            if (job.container) {
+                const image = isPlainObject(job.container) ? job.container.image : job.container;
+                html += `<p><strong>🐳 Container:</strong> <code>${escapeHtml(String(image))}</code></p>`;
+            }
+            if (isPlainObject(job.services)) {
+                html += `<p><strong>🛠️ Services:</strong> ${Object.entries(job.services).map(([name, svc]) => describeGitHubService(name, svc)).join(', ')}</p>`;
+            }
+            if (job.concurrency) { html += `<p><strong>🚦 Concurrency:</strong> ${escapeHtml(describeConcurrency(job.concurrency))}</p>`; }
+            if (job.permissions) { html += `<p><strong>🔐 Permissions:</strong> ${escapeHtml(describePermissions(job.permissions))}</p>`; }
+            if (job['timeout-minutes'] !== undefined) { html += `<p><strong>⏱️ Timeout:</strong> ${escapeHtml(String(job['timeout-minutes']))} min</p>`; }
+            if (job['continue-on-error'] !== undefined && job['continue-on-error'] !== false) {
+                html += `<p class="approval-info">ℹ️ Continue on error: ${escapeHtml(String(job['continue-on-error']))}</p>`;
+            }
+            if (isPlainObject(job.outputs)) {
+                html += `<p><strong>📤 Outputs:</strong> ${Object.keys(job.outputs).map(o => `<code>${escapeHtml(o)}</code>`).join(', ')}</p>`;
+            }
+            return html;
         }
 
         function renderGitHub(data) {
@@ -347,57 +687,70 @@
                 html += `<div class="info-card"><h3>🔔 Triggers</h3><p>${triggers.join(', ')}</p></div>`;
             }
             if (data.jobs) html += `<div class="info-card"><h3>💼 Jobs</h3><p>${Object.keys(data.jobs).length}</p></div>`;
+            if (data.concurrency) html += `<div class="info-card"><h3>🚦 Concurrency</h3><p>${escapeHtml(describeConcurrency(data.concurrency))}</p></div>`;
+            if (data.permissions) html += `<div class="info-card"><h3>🔐 Permissions</h3><p>${escapeHtml(describePermissions(data.permissions))}</p></div>`;
             html += '</div>';
+            html += renderGitHubTriggers(data.on);
 
-            let diagramDirection = 'TD';
-            if (layoutPreference === 'horizontal') {
-                diagramDirection = 'LR';
-            } else if (layoutPreference === 'vertical') {
-                diagramDirection = 'TD';
-            } else {
-                diagramDirection = (data.jobs && Object.keys(data.jobs).length <= 6) ? 'LR' : 'TD';
-            }
-            let diagram = `graph ${diagramDirection}\nSTART([Start])`;
             const jobColors = themePalette;
-            if (data.jobs) {
-                Object.keys(data.jobs).forEach((key, idx) => {
-                    const id = `J${idx}`;
-                    const jobLabel = (data.jobs[key].name || key).replace(/"/g, "'");
-                    diagram += ` --> ${id}["${jobLabel}"]`;
+            const jobKeys = data.jobs ? Object.keys(data.jobs) : [];
+            // Jobs run in parallel unless they declare `needs`
+            const jobEdges = [];
+            jobKeys.forEach((key, idx) => {
+                const job = data.jobs[key] || {};
+                asList(job.needs).forEach(dep => {
+                    const depIdx = jobKeys.indexOf(dep);
+                    if (depIdx >= 0) { jobEdges.push([`J${depIdx}`, `J${idx}`]); }
                 });
-            }
-            diagram += ' --> END([End])';
-            if (data.jobs) {
-                Object.keys(data.jobs).forEach((key, idx) => {
-                    const id = `J${idx}`;
-                    const color = jobColors[idx % jobColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToJob_${idx}`;
-                    window[`scrollToJob_${idx}`] = function() { scrollToStage(`J${idx}`); };
-                });
-            }
-            const edgeCount = (data.jobs ? Object.keys(data.jobs).length : 0) + 1;
-            for (let i = 0; i < edgeCount; i++) {
-                diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
-            }
-            html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+            });
+            html += buildFlowchart(jobKeys.map((key, idx) => ({
+                id: `J${idx}`,
+                label: (data.jobs[key] && data.jobs[key].name) || key,
+                color: jobColors[idx % jobColors.length],
+                scrollTo: `J${idx}`
+            })), jobEdges);
 
             if (data.jobs) {
                 Object.entries(data.jobs).forEach(([key, job], idx) => {
                     const color = jobColors[idx % jobColors.length];
-                    html += `<div id="J${idx}" class="job-container" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="color: ${color};">💼 ${job.name || key}</h2>`;
+                    html += `<div id="J${idx}" class="job-container" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="color: ${color};">💼 ${escapeHtml(String(job.name || key))}</h2>`;
                     html += '<div class="job">';
-                    if (job['runs-on']) html += `<p><strong>🖥️ Runs on:</strong> ${job['runs-on']}</p>`;
+                    if (job['runs-on']) html += `<p><strong>🖥️ Runs on:</strong> ${escapeHtml(describeRunsOn(job['runs-on']))}</p>`;
+
+                    if (job.uses) {
+                        html += '<div class="approval-badge">♻️ Reusable Workflow</div>';
+                        html += `<p><strong>Calls:</strong> <code>${escapeHtml(String(job.uses))}</code></p>`;
+                        if (isPlainObject(job.with)) {
+                            html += `<p><strong>With:</strong> ${Object.entries(job.with).map(([k, v]) => `<code>${escapeHtml(k)}</code> = ${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}`).join(', ')}</p>`;
+                        }
+                        if (job.secrets === 'inherit') {
+                            html += '<p><strong>Secrets:</strong> inherited</p>';
+                        } else if (isPlainObject(job.secrets)) {
+                            html += `<p><strong>Secrets:</strong> ${Object.keys(job.secrets).map(s => `<code>${escapeHtml(s)}</code>`).join(', ')}</p>`;
+                        }
+                    }
 
                     if (job.environment) {
                         const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
-                        html += `<div class="approval-badge">🔒 Protected Environment</div>`;
-                        html += `<p><strong>📦 Environment:</strong> ${envName}</p>`;
-                        if (typeof job.environment === 'object' && job.environment.url) {
-                            html += `<p><strong>🔗 URL:</strong> <code>${job.environment.url}</code></p>`;
+                        // `deployment: false` uses the environment's secrets and variables without a deployment
+                        const createsDeployment = !(isPlainObject(job.environment) && job.environment.deployment === false);
+                        if (createsDeployment) {
+                            html += `<div class="approval-badge">🔒 Protected Environment</div>`;
+                        } else {
+                            html += `<div class="approval-badge" style="background: linear-gradient(135deg, #888 0%, #666 100%);">🔑 Environment (no deployment)</div>`;
                         }
-                        html += `<p class="approval-info">⚠️ This environment may require approval before deployment</p>`;
+                        html += `<p><strong>📦 Environment:</strong> ${escapeHtml(String(envName))}</p>`;
+                        if (typeof job.environment === 'object' && job.environment.url) {
+                            html += `<p><strong>🔗 URL:</strong> <code>${escapeHtml(String(job.environment.url))}</code></p>`;
+                        }
+                        if (createsDeployment) {
+                            html += `<p class="approval-info">⚠️ This environment may require approval before deployment</p>`;
+                        } else {
+                            html += `<p class="approval-info">ℹ️ Uses the environment's secrets and variables without creating a deployment</p>`;
+                        }
                     }
+
+                    html += renderGitHubJobSettings(job);
 
                     if (job.steps) {
                         html += '<h3>Steps</h3><ul class="steps">';
@@ -405,7 +758,8 @@
                             const sid = `step_${stepCounter++}`;
                             allSteps[sid] = step;
                             const name = step.name || step.uses || step.run?.substring(0, 50) || 'Step';
-                            html += `<li data-step="${sid}" style="cursor:pointer;">📝 ${name}</li>`;
+                            const condition = step.if !== undefined ? ` <span style="opacity: 0.7; font-size: 11px;">if ${escapeHtml(String(step.if))}</span>` : '';
+                            html += `<li data-step="${sid}" style="cursor:pointer;">📝 ${escapeHtml(String(name))}${condition}</li>`;
                         });
                         html += '</ul>';
                     }
@@ -420,12 +774,208 @@
             }
         }
 
+        function isPlainObject(value) {
+            return value !== null && typeof value === 'object' && !Array.isArray(value);
+        }
+
+        // Applies `extends:` (hashes merge deeply, other values are replaced, as in GitLab) and
+        // inlines `!reference [job, key]` entries. The tag is stripped before parsing, so a
+        // reference arrives as an array of strings whose first item names a top-level key.
+        function resolveGitLabConfig(data) {
+            const deepMerge = (base, override) => {
+                if (!isPlainObject(base) || !isPlainObject(override)) { return override; }
+                const out = Object.assign({}, base);
+                Object.keys(override).forEach(k => { out[k] = k in base ? deepMerge(base[k], override[k]) : override[k]; });
+                return out;
+            };
+            const resolved = {};
+            const resolving = new Set();
+            const resolveJob = (key) => {
+                if (resolved[key]) { return resolved[key]; }
+                const job = data[key];
+                if (resolving.has(key)) { return job; }
+                resolving.add(key);
+                let merged = {};
+                asList(job.extends).forEach(parent => {
+                    if (isPlainObject(data[parent])) { merged = deepMerge(merged, resolveJob(parent)); }
+                });
+                merged = deepMerge(merged, job);
+                resolving.delete(key);
+                resolved[key] = merged;
+                return merged;
+            };
+            const result = {};
+            Object.keys(data).forEach(key => { result[key] = isPlainObject(data[key]) ? resolveJob(key) : data[key]; });
+
+            const isReference = (entry) => Array.isArray(entry) && entry.length >= 2 &&
+                entry.every(p => typeof p === 'string') && isPlainObject(result[entry[0]]);
+            const lookup = (path) => path.reduce((value, part) => (value && typeof value === 'object') ? value[part] : undefined, result);
+            const expand = (value, depth) => {
+                if (depth > 10) { return value; }
+                if (isReference(value)) { return expand(lookup(value), depth + 1); }
+                if (!Array.isArray(value)) { return value; }
+                const out = [];
+                value.forEach(item => {
+                    if (isReference(item)) {
+                        asList(expand(lookup(item), depth + 1)).forEach(x => out.push(x));
+                    } else {
+                        out.push(item);
+                    }
+                });
+                return out;
+            };
+            Object.keys(result).forEach(key => {
+                const job = result[key];
+                if (!isPlainObject(job)) { return; }
+                ['script', 'before_script', 'after_script', 'rules'].forEach(k => {
+                    if (job[k] !== undefined) { job[k] = expand(job[k], 0); }
+                });
+            });
+            return result;
+        }
+
+        function describeGitLabRule(rule) {
+            if (!isPlainObject(rule)) { return String(rule); }
+            const parts = [];
+            if (rule.if) { parts.push(`if <code>${escapeHtml(String(rule.if))}</code>`); }
+            if (rule.changes) {
+                const paths = isPlainObject(rule.changes) ? asList(rule.changes.paths) : asList(rule.changes);
+                parts.push(`changes ${paths.map(p => `<code>${escapeHtml(String(p))}</code>`).join(', ')}`);
+            }
+            if (rule.exists) {
+                const paths = isPlainObject(rule.exists) ? asList(rule.exists.paths) : asList(rule.exists);
+                parts.push(`exists ${paths.map(p => `<code>${escapeHtml(String(p))}</code>`).join(', ')}`);
+            }
+            const outcome = [];
+            if (rule.when) { outcome.push(`when: ${escapeHtml(String(rule.when))}`); }
+            if (rule.allow_failure !== undefined) { outcome.push(`allow_failure: ${escapeHtml(String(rule.allow_failure))}`); }
+            if (rule.variables) { outcome.push(`sets ${Object.keys(rule.variables).map(v => escapeHtml(v)).join(', ')}`); }
+            if (rule.needs) { outcome.push('overrides needs'); }
+            return (parts.length ? parts.join(' and ') : 'always') + (outcome.length ? ` → ${outcome.join(', ')}` : '');
+        }
+
+        function renderGitLabRules(rules, title) {
+            const list = asList(rules);
+            if (!list.length) { return ''; }
+            let html = `<p><strong>${title}:</strong></p><ul class="rules">`;
+            list.forEach(rule => { html += `<li>${describeGitLabRule(rule)}</li>`; });
+            return html + '</ul>';
+        }
+
+        function countParallelJobs(parallel) {
+            if (typeof parallel === 'number') { return parallel; }
+            if (isPlainObject(parallel) && Array.isArray(parallel.matrix)) {
+                return parallel.matrix.reduce((total, entry) => total + Object.values(entry || {})
+                    .reduce((product, values) => product * asList(values).length, 1), 0);
+            }
+            return 0;
+        }
+
+        function describeGitLabInclude(entry) {
+            if (typeof entry === 'string') { return `📄 ${escapeHtml(entry)}`; }
+            if (!isPlainObject(entry)) { return escapeHtml(JSON.stringify(entry)); }
+            if (entry.component) { return `🧩 component <code>${escapeHtml(String(entry.component))}</code>`; }
+            if (entry.local) { return `📄 local <code>${escapeHtml(String(entry.local))}</code>`; }
+            if (entry.project) {
+                const files = asList(entry.file).map(f => `<code>${escapeHtml(String(f))}</code>`).join(', ');
+                return `📦 project <code>${escapeHtml(String(entry.project))}</code>${entry.ref ? ` @ ${escapeHtml(String(entry.ref))}` : ''}${files ? `: ${files}` : ''}`;
+            }
+            if (entry.remote) { return `🌐 remote <code>${escapeHtml(String(entry.remote))}</code>`; }
+            if (entry.template) { return `📋 template <code>${escapeHtml(String(entry.template))}</code>`; }
+            return escapeHtml(JSON.stringify(entry));
+        }
+
+        // Settings shown on every job card, below the image / tags / needs lines
+        function renderGitLabJobSettings(job) {
+            let html = '';
+            if (job.extends !== undefined) {
+                html += `<p><strong>🧬 Extends:</strong> ${asList(job.extends).map(e => `<code>${escapeHtml(String(e))}</code>`).join(', ')}</p>`;
+            }
+            const parallelCount = countParallelJobs(job.parallel);
+            if (parallelCount) {
+                html += `<p><strong>🔀 Parallel:</strong> ${parallelCount} jobs</p>`;
+                if (isPlainObject(job.parallel) && Array.isArray(job.parallel.matrix)) {
+                    html += '<ul class="rules">';
+                    job.parallel.matrix.forEach(entry => {
+                        html += `<li>${Object.entries(entry || {}).map(([k, v]) => `${escapeHtml(k)}: ${asList(v).map(x => escapeHtml(String(x))).join(' | ')}`).join(' × ')}</li>`;
+                    });
+                    html += '</ul>';
+                }
+            }
+            if (job.inputs && isPlainObject(job.inputs)) {
+                const inputs = Object.entries(job.inputs).map(([name, def]) => {
+                    const value = isPlainObject(def) ? def.default : def;
+                    return `<code>${escapeHtml(name)}</code>${value !== undefined ? ` = ${escapeHtml(typeof value === 'object' ? JSON.stringify(value) : String(value))}` : ''}`;
+                });
+                html += `<p><strong>📥 Inputs:</strong> ${inputs.join(', ')}</p>`;
+            }
+            if (isPlainObject(job.environment) && job.environment.action) {
+                html += `<p><strong>🎬 Environment action:</strong> ${escapeHtml(String(job.environment.action))}</p>`;
+            }
+            if (job.services) {
+                const services = asList(job.services).map(s => escapeHtml(String(isPlainObject(s) ? (s.alias ? `${s.name} (${s.alias})` : s.name) : s)));
+                html += `<p><strong>🛠️ Services:</strong> ${services.join(', ')}</p>`;
+            }
+            if (job.cache) {
+                const caches = asList(job.cache).map(c => {
+                    if (!isPlainObject(c)) { return escapeHtml(String(c)); }
+                    const key = isPlainObject(c.key) ? `files: ${asList(c.key.files).join(', ')}` : c.key;
+                    return escapeHtml([key ? `key ${key}` : '', c.paths ? asList(c.paths).join(', ') : '', c.policy ? `(${c.policy})` : ''].filter(Boolean).join(' '));
+                });
+                html += `<p><strong>💾 Cache:</strong> ${caches.join('; ')}</p>`;
+            }
+            if (isPlainObject(job.artifacts)) {
+                const parts = [];
+                if (job.artifacts.paths) { parts.push(asList(job.artifacts.paths).map(p => escapeHtml(String(p))).join(', ')); }
+                if (job.artifacts.reports) { parts.push(`reports: ${Object.keys(job.artifacts.reports).map(r => escapeHtml(r)).join(', ')}`); }
+                if (job.artifacts.expire_in) { parts.push(`expires in ${escapeHtml(String(job.artifacts.expire_in))}`); }
+                if (job.artifacts.when) { parts.push(`when ${escapeHtml(String(job.artifacts.when))}`); }
+                html += `<p><strong>📦 Artifacts:</strong> ${parts.join('; ')}</p>`;
+            }
+            if (job.retry !== undefined) {
+                const retry = isPlainObject(job.retry)
+                    ? `${job.retry.max || 0}${job.retry.when ? ` on ${asList(job.retry.when).join(', ')}` : ''}`
+                    : String(job.retry);
+                html += `<p><strong>🔁 Retry:</strong> ${escapeHtml(retry)}</p>`;
+            }
+            if (job.timeout) { html += `<p><strong>⏱️ Timeout:</strong> ${escapeHtml(String(job.timeout))}</p>`; }
+            if (job.resource_group) { html += `<p><strong>🔒 Resource group:</strong> <code>${escapeHtml(String(job.resource_group))}</code></p>`; }
+            if (isPlainObject(job.release)) { html += `<p><strong>🏷️ Release:</strong> <code>${escapeHtml(String(job.release.tag_name || job.release.name || ''))}</code></p>`; }
+            if (job.coverage) { html += `<p><strong>📈 Coverage regex:</strong> <code>${escapeHtml(String(job.coverage))}</code></p>`; }
+            if (isPlainObject(job.id_tokens)) { html += `<p><strong>🪪 ID tokens:</strong> ${Object.keys(job.id_tokens).map(t => escapeHtml(t)).join(', ')}</p>`; }
+            if (isPlainObject(job.secrets)) { html += `<p><strong>🔑 Secrets:</strong> ${Object.keys(job.secrets).map(s => escapeHtml(s)).join(', ')}</p>`; }
+            html += renderGitLabRules(job.rules, '📋 Rules');
+            return html;
+        }
+
+        function renderGitLabTrigger(trigger) {
+            let html = '<div class="approval-badge">🔗 Downstream Pipeline</div>';
+            if (typeof trigger === 'string') {
+                return html + `<p><strong>Project:</strong> <code>${escapeHtml(trigger)}</code></p>`;
+            }
+            if (!isPlainObject(trigger)) { return html; }
+            if (trigger.project) {
+                html += `<p><strong>Project:</strong> <code>${escapeHtml(String(trigger.project))}</code>${trigger.branch ? ` @ ${escapeHtml(String(trigger.branch))}` : ''}</p>`;
+            }
+            if (trigger.include) {
+                html += `<p><strong>Child pipeline:</strong> ${asList(trigger.include).map(describeGitLabInclude).join(', ')}</p>`;
+            }
+            if (trigger.strategy) {
+                html += `<p><strong>Strategy:</strong> ${escapeHtml(String(trigger.strategy))}${trigger.strategy === 'depend' ? ' (waits for the downstream pipeline)' : ''}</p>`;
+            }
+            if (trigger.forward) {
+                html += `<p><strong>Forward:</strong> ${Object.entries(trigger.forward).filter(([, v]) => v).map(([k]) => escapeHtml(k)).join(', ') || 'none'}</p>`;
+            }
+            return html;
+        }
+
         function renderGitLab(data) {
             try {
                 if (!data) {
                     showError('No Data', 'Pipeline data is empty or undefined.', '<strong>Tip:</strong> Make sure your YAML file contains valid GitLab CI configuration.');
                     return;
                 }
+                data = resolveGitLabConfig(data);
 
                 const RESERVED = new Set(['stages', 'variables', 'default', 'include', 'workflow', 'spec', 'image', 'services', 'cache', 'before_script', 'after_script']);
                 const jobEntries = Object.entries(data).filter(([key, value]) =>
@@ -462,42 +1012,73 @@
                 const specInputs = (pipelineSpec && pipelineSpec.inputs && typeof pipelineSpec.inputs === 'object') ? pipelineSpec.inputs : null;
                 if (specInputs) html += `<div class="info-card"><h3>📥 Inputs</h3><p>${Object.keys(specInputs).length} declared</p></div>`;
                 if (data.variables) html += `<div class="info-card"><h3>🔧 Variables</h3><p>${Object.keys(data.variables).length} defined</p></div>`;
-                if (data.workflow) html += '<div class="info-card"><h3>🔀 Workflow</h3><p>Configured</p></div>';
+                if (data.workflow) {
+                    const workflowParts = [];
+                    if (data.workflow.rules) { workflowParts.push(`${asList(data.workflow.rules).length} rule(s)`); }
+                    if (isPlainObject(data.workflow.auto_cancel)) {
+                        Object.entries(data.workflow.auto_cancel).forEach(([k, v]) => workflowParts.push(`${k.replace(/_/g, ' ')}: ${v}`));
+                    }
+                    html += `<div class="info-card"><h3>🔀 Workflow</h3><p>${escapeHtml(workflowParts.join(', ') || 'Configured')}</p></div>`;
+                }
+                if (data.include) html += `<div class="info-card"><h3>📎 Includes</h3><p>${asList(data.include).length} source(s)</p></div>`;
                 if (data.default && data.default.image) {
                     const imgName = typeof data.default.image === 'string' ? data.default.image : data.default.image.name;
                     html += `<div class="info-card"><h3>🐳 Default Image</h3><p>${imgName}</p></div>`;
                 }
                 html += '</div>';
 
-                let diagramDirection = 'LR';
-                if (layoutPreference === 'vertical') {
-                    diagramDirection = 'TD';
-                } else if (layoutPreference === 'horizontal') {
-                    diagramDirection = 'LR';
+                const stageColors = themePalette;
+                const usesNeeds = jobEntries.some(([, job]) => job.needs !== undefined);
+                if (usesNeeds) {
+                    // Job-level graph: `needs` overrides stage ordering (`needs: []` starts immediately);
+                    // jobs without `needs` wait for every job in the previous stage
+                    const jobNodes = [];
+                    const jobNodeId = {};
+                    activeStages.forEach((stage, sIdx) => {
+                        jobsByStage[stage].forEach(({ key }) => {
+                            const id = `GLJ${jobNodes.length}`;
+                            jobNodeId[key] = id;
+                            jobNodes.push({ id, label: key, color: stageColors[sIdx % stageColors.length], scrollTo: `GL${sIdx}` });
+                        });
+                    });
+                    const jobEdges = [];
+                    activeStages.forEach((stage, sIdx) => {
+                        jobsByStage[stage].forEach(({ key, job }) => {
+                            if (job.needs !== undefined) {
+                                asList(job.needs).forEach(need => {
+                                    const needName = typeof need === 'string' ? need : (need && need.job);
+                                    if (jobNodeId[needName]) { jobEdges.push([jobNodeId[needName], jobNodeId[key]]); }
+                                });
+                            } else if (sIdx > 0) {
+                                jobsByStage[activeStages[sIdx - 1]].forEach(prev => {
+                                    jobEdges.push([jobNodeId[prev.key], jobNodeId[key]]);
+                                });
+                            }
+                        });
+                    });
+                    html += buildFlowchart(jobNodes, jobEdges);
                 } else {
-                    diagramDirection = activeStages.length <= 6 ? 'LR' : 'TD';
+                    const stageIds = activeStages.map((stage, idx) => `GL${idx}`);
+                    html += buildFlowchart(activeStages.map((stage, idx) => ({
+                        id: `GL${idx}`,
+                        label: stage,
+                        color: stageColors[idx % stageColors.length],
+                        scrollTo: `GL${idx}`
+                    })), chainEdges(stageIds));
                 }
 
-                const stageColors = themePalette;
-                let diagram = `graph ${diagramDirection}\nSTART([Start])`;
-                activeStages.forEach((stage, idx) => {
-                    const id = `GL${idx}`;
-                    const label = stage.replace(/"/g, "'");
-                    diagram += ` --> ${id}["${label}"]`;
-                });
-                diagram += ' --> END([End])';
-                activeStages.forEach((stage, idx) => {
-                    const id = `GL${idx}`;
-                    const color = stageColors[idx % stageColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToGLStage_${idx}`;
-                    window[`scrollToGLStage_${idx}`] = function() { scrollToStage(`GL${idx}`); };
-                });
-                const glEdgeCount = activeStages.length + 1;
-                for (let i = 0; i < glEdgeCount; i++) {
-                    diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
+                if (data.include || (data.workflow && data.workflow.rules)) {
+                    html += '<div class="stage"><h2>📎 Configuration</h2><div class="job">';
+                    if (data.include) {
+                        html += '<p><strong>Includes:</strong></p><ul class="rules">';
+                        asList(data.include).forEach(entry => { html += `<li>${describeGitLabInclude(entry)}</li>`; });
+                        html += '</ul>';
+                    }
+                    if (data.workflow && data.workflow.rules) {
+                        html += renderGitLabRules(data.workflow.rules, 'Workflow rules');
+                    }
+                    html += '</div></div>';
                 }
-                html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
 
                 if (specInputs) {
                     const inputsColor = stageColors[(activeStages.length) % stageColors.length];
@@ -516,8 +1097,22 @@
                         if (Array.isArray(def.options)) {
                             html += `<p><strong>Options:</strong> ${def.options.map(o => escapeHtml(String(o))).join(', ')}</p>`;
                         }
+                        if (def.regex) {
+                            html += `<p><strong>Regex:</strong> <code>${escapeHtml(String(def.regex))}</code></p>`;
+                        }
                         if (def.description) {
                             html += `<p>${escapeHtml(String(def.description))}</p>`;
+                        }
+                        if (Array.isArray(def.rules)) {
+                            html += '<p><strong>Conditional values:</strong></p><ul class="rules">';
+                            def.rules.forEach(rule => {
+                                const r = isPlainObject(rule) ? rule : {};
+                                const result = [];
+                                if (Array.isArray(r.options)) { result.push(`options ${r.options.map(o => escapeHtml(String(o))).join(', ')}`); }
+                                if (r.default !== undefined) { result.push(`default <code>${escapeHtml(String(r.default))}</code>`); }
+                                html += `<li>${r.if ? `if <code>${escapeHtml(String(r.if))}</code>` : 'otherwise'} → ${result.join(', ') || 'no change'}</li>`;
+                            });
+                            html += '</ul>';
                         }
                         html += '</div>';
                     });
@@ -536,14 +1131,18 @@
                         const isManual = job.when === 'manual';
                         const hasEnv = !!job.environment;
 
-                        if (isManual && !hasEnv) {
+                        if (isManual && !hasEnv && !job.trigger) {
                             html += '<div class="approval">';
                             html += '<h4>⏸️ Manual Job</h4>';
-                            html += `<p><strong>Job:</strong> ${key}</p>`;
-                            if (job.rules) html += `<p><strong>Rules:</strong> ${job.rules.length} condition(s)</p>`;
+                            html += `<p><strong>Job:</strong> ${escapeHtml(key)}</p>`;
+                            html += renderGitLabRules(job.rules, 'Rules');
                             html += '</div>';
                         } else {
-                            html += `<div class="job"><h3>${key}</h3>`;
+                            html += `<div class="job"><h3>${escapeHtml(key)}</h3>`;
+
+                            if (job.trigger) {
+                                html += renderGitLabTrigger(job.trigger);
+                            }
 
                             if (hasEnv) {
                                 const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
@@ -571,9 +1170,7 @@
                                 }
                             }
 
-                            if (job.rules && job.rules.length > 0) {
-                                html += `<p><strong>📋 Rules:</strong> ${job.rules.length} condition(s)</p>`;
-                            }
+                            html += renderGitLabJobSettings(job);
 
                             if (job.allow_failure === true) {
                                 html += '<p class="approval-info">ℹ️ Allowed to fail</p>';
@@ -601,7 +1198,7 @@
                                 steps.forEach(({ label, script, phase }) => {
                                     const sid = `step_${stepCounter++}`;
                                     allSteps[sid] = { script, phase, displayName: label };
-                                    html += `<li data-step="${sid}" style="cursor:pointer;">${label}</li>`;
+                                    html += `<li data-step="${sid}" style="cursor:pointer;">${escapeHtml(label)}</li>`;
                                 });
                                 html += '</ul>';
                             }
@@ -651,6 +1248,136 @@
             return html;
         }
 
+        const BATCH_TYPES = ['build-graph', 'build-list', 'build-matrix', 'build-fanout'];
+
+        // ABORT | CONTINUE | RETRY | RETRY-<count> | RETRY-<regex> | RETRY-<count>-<regex>
+        function describeOnFailure(value) {
+            const retry = value.match(/^RETRY(?:-(\d+))?(?:-(.+))?$/);
+            if (retry) {
+                const count = retry[1] ? `up to ${retry[1]} times` : 'up to 3 times';
+                return `retry ${count}${retry[2] ? ` when the error matches /${retry[2]}/` : ''}`;
+            }
+            if (value === 'CONTINUE') { return 'continue with the next phase'; }
+            if (value === 'ABORT') { return 'abort the build'; }
+            return value;
+        }
+
+        // Top-level env / cache / proxy settings that apply to the whole build
+        function renderCodeBuildSettings(data) {
+            const rows = [];
+            const env = data.env || {};
+            if (env['git-credential-helper'] !== undefined) {
+                rows.push(`<p><strong>🔐 Git credential helper:</strong> ${escapeHtml(String(env['git-credential-helper']))}</p>`);
+            }
+            if (env.variables) {
+                rows.push(`<p><strong>🔧 Variables:</strong> ${Object.keys(env.variables).map(v => `<code>${escapeHtml(v)}</code>`).join(', ')}</p>`);
+            }
+            if (env['parameter-store']) {
+                rows.push(`<p><strong>🔑 Parameter Store:</strong> ${Object.keys(env['parameter-store']).map(v => `<code>${escapeHtml(v)}</code>`).join(', ')}</p>`);
+            }
+            if (env['secrets-manager']) {
+                rows.push(`<p><strong>🔑 Secrets Manager:</strong> ${Object.keys(env['secrets-manager']).map(v => `<code>${escapeHtml(v)}</code>`).join(', ')}</p>`);
+            }
+            if (env['exported-variables']) {
+                rows.push(`<p><strong>📤 Exported:</strong> ${asList(env['exported-variables']).map(v => `<code>${escapeHtml(String(v))}</code>`).join(', ')}</p>`);
+            }
+            const cache = data.cache || {};
+            if (cache.key || cache['fallback-keys'] || cache.action || cache.paths) {
+                const parts = [];
+                if (cache.key) { parts.push(`key <code>${escapeHtml(String(cache.key))}</code>`); }
+                if (cache['fallback-keys']) { parts.push(`fallback ${asList(cache['fallback-keys']).map(k => `<code>${escapeHtml(String(k))}</code>`).join(', ')}`); }
+                if (cache.action) { parts.push(`action ${escapeHtml(String(cache.action))}`); }
+                if (cache.paths) { parts.push(`paths ${asList(cache.paths).map(p => `<code>${escapeHtml(String(p))}</code>`).join(', ')}`); }
+                rows.push(`<p><strong>💾 Cache:</strong> ${parts.join('; ')}</p>`);
+            }
+            if (data.proxy) {
+                const proxy = Object.entries(data.proxy).map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(String(v))}`).join(', ');
+                rows.push(`<p><strong>🌐 Proxy:</strong> ${proxy}</p>`);
+            }
+            if (!rows.length) { return ''; }
+            return `<div class="stage"><h2>⚙️ Build Settings</h2><div class="job">${rows.join('')}</div></div>`;
+        }
+
+        function describeBatchBuild(build) {
+            const b = build || {};
+            const env = b.env || {};
+            const parts = [];
+            if (b.buildspec) { parts.push(`buildspec <code>${escapeHtml(String(b.buildspec))}</code>`); }
+            if (env['compute-type']) { parts.push(escapeHtml(asList(env['compute-type']).join(' | '))); }
+            if (env.image) { parts.push(`<code>${escapeHtml(asList(env.image).join(' | '))}</code>`); }
+            if (env.variables) {
+                parts.push(Object.entries(env.variables).map(([k, v]) => `${escapeHtml(k)}=${escapeHtml(asList(v).join(' | '))}`).join(', '));
+            }
+            if (b['ignore-failure']) { parts.push('ignore failure'); }
+            if (b['debug-session']) { parts.push('debug session'); }
+            return parts.join(' · ');
+        }
+
+        function renderCodeBuildBatch(batch) {
+            let html = '<div class="stage"><h2>🧩 Batch Build</h2>';
+            const options = [];
+            if (batch['fast-fail'] !== undefined) { options.push(`fast-fail: ${batch['fast-fail']}`); }
+            if (batch['combine-artifacts'] !== undefined) { options.push(`combine-artifacts: ${batch['combine-artifacts']}`); }
+            if (batch['timeout-in-mins']) { options.push(`timeout: ${batch['timeout-in-mins']} min`); }
+            if (batch['service-role']) { options.push(`service role: ${batch['service-role']}`); }
+            if (options.length) { html += `<p>${escapeHtml(options.join(' · '))}</p>`; }
+
+            const builds = asList(batch['build-graph'] || batch['build-list']);
+            if (builds.length) {
+                // build-graph orders builds with depend-on; build-list runs them all in parallel
+                const ids = {};
+                builds.forEach((b, idx) => { if (b && b.identifier) { ids[b.identifier] = `CBB${idx}`; } });
+                const edges = [];
+                if (batch['build-graph']) {
+                    builds.forEach((b, idx) => {
+                        asList(b && b['depend-on']).forEach(dep => { if (ids[dep]) { edges.push([ids[dep], `CBB${idx}`]); } });
+                    });
+                }
+                html += buildFlowchart(builds.map((b, idx) => ({
+                    id: `CBB${idx}`,
+                    label: (b && b.identifier) || `Build ${idx + 1}`,
+                    color: themePalette[idx % themePalette.length],
+                    scrollTo: `CBB${idx}_card`
+                })), edges);
+                builds.forEach((b, idx) => {
+                    html += `<div id="CBB${idx}_card" class="job"><h3><code>${escapeHtml(String((b && b.identifier) || `Build ${idx + 1}`))}</code></h3>`;
+                    const details = describeBatchBuild(b);
+                    if (details) { html += `<p>${details}</p>`; }
+                    if (b && b['depend-on']) { html += `<p><strong>Depends on:</strong> ${asList(b['depend-on']).map(d => `<code>${escapeHtml(String(d))}</code>`).join(', ')}</p>`; }
+                    html += '</div>';
+                });
+            }
+
+            if (batch['build-matrix']) {
+                const matrix = batch['build-matrix'];
+                const dynamic = matrix.dynamic || {};
+                const dimensions = [];
+                if (dynamic.buildspec) { dimensions.push(['buildspec', asList(dynamic.buildspec)]); }
+                const dynEnv = dynamic.env || {};
+                ['compute-type', 'image', 'type'].forEach(k => { if (dynEnv[k]) { dimensions.push([k, asList(dynEnv[k])]); } });
+                Object.entries(dynEnv.variables || {}).forEach(([k, v]) => dimensions.push([k, asList(v)]));
+                const combinations = dimensions.reduce((total, [, values]) => total * values.length, 1);
+                html += `<div class="job"><h3>Matrix: ${dimensions.length ? combinations : 0} build(s)</h3>`;
+                dimensions.forEach(([k, values]) => {
+                    html += `<p><strong>${escapeHtml(k)}:</strong> ${values.map(v => `<code>${escapeHtml(String(v))}</code>`).join(' | ')}</p>`;
+                });
+                if (matrix.static) {
+                    const staticDetails = describeBatchBuild(matrix.static);
+                    if (staticDetails) { html += `<p><strong>Shared:</strong> ${staticDetails}</p>`; }
+                }
+                html += '</div>';
+            }
+
+            if (batch['build-fanout']) {
+                const fanout = batch['build-fanout'];
+                html += `<div class="job"><h3>Fan-out: ${escapeHtml(String(fanout.parallelism || '?'))} parallel build(s)</h3>`;
+                if (fanout['ignore-failure']) { html += '<p>Ignore failure: true</p>'; }
+                html += '<p class="approval-info">ℹ️ Tests are split across the parallel builds</p></div>';
+            }
+
+            return html + '</div>';
+        }
+
         function renderAWSCodeBuild(data) {
             try {
                 if (!data) {
@@ -661,9 +1388,19 @@
                 const PHASE_ORDER = ['install', 'pre_build', 'build', 'post_build'];
                 const presentPhases = PHASE_ORDER.filter(p => data.phases && data.phases[p]);
 
-                let html = `<p><strong>Buildspec version:</strong> ${data.version || 'Not specified'}</p>`;
+                let html = `<p><strong>Buildspec version:</strong> ${escapeHtml(String(data.version || 'Not specified'))}</p>`;
                 html += '<div class="info-grid">';
                 html += `<div class="info-card"><h3>🔧 Phases</h3><p>${presentPhases.length} defined</p></div>`;
+                if (data['run-as']) {
+                    html += `<div class="info-card"><h3>👤 Run as</h3><p>${escapeHtml(String(data['run-as']))}</p></div>`;
+                }
+                if (data.env && data.env.shell) {
+                    html += `<div class="info-card"><h3>🐚 Shell</h3><p>${escapeHtml(String(data.env.shell))}</p></div>`;
+                }
+                if (data.batch) {
+                    const batchType = BATCH_TYPES.find(t => data.batch[t]);
+                    html += `<div class="info-card"><h3>🧩 Batch</h3><p>${escapeHtml(batchType || 'Configured')}</p></div>`;
+                }
 
                 const secondaryArtifacts = (data.artifacts && data.artifacts['secondary-artifacts'] && typeof data.artifacts['secondary-artifacts'] === 'object')
                     ? Object.entries(data.artifacts['secondary-artifacts'])
@@ -687,7 +1424,7 @@
                 }
 
                 if (data.cache && data.cache.paths) {
-                    html += `<div class="info-card"><h3>💾 Cache</h3><p>${data.cache.paths.length} path(s)</p></div>`;
+                    html += `<div class="info-card"><h3>💾 Cache</h3><p>${asList(data.cache.paths).length} path(s)</p></div>`;
                 }
 
                 if (data.reports) {
@@ -696,35 +1433,18 @@
 
                 html += '</div>';
 
-                let diagramDirection = 'LR';
-                if (layoutPreference === 'vertical') {
-                    diagramDirection = 'TD';
-                } else if (layoutPreference === 'horizontal') {
-                    diagramDirection = 'LR';
-                } else {
-                    diagramDirection = presentPhases.length <= 6 ? 'LR' : 'TD';
-                }
+                html += renderCodeBuildSettings(data);
 
                 const phaseColors = themePalette;
-                let diagram = `graph ${diagramDirection}\nSTART([Start])`;
-                presentPhases.forEach((phase, idx) => {
-                    const id = `CB${idx}`;
-                    const label = phase.replace(/_/g, ' ');
-                    diagram += ` --> ${id}["${label}"]`;
-                });
-                diagram += ' --> END([End])';
-                presentPhases.forEach((phase, idx) => {
-                    const id = `CB${idx}`;
-                    const color = phaseColors[idx % phaseColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToCBPhase_${idx}`;
-                    window[`scrollToCBPhase_${idx}`] = function() { scrollToStage(`CB${idx}`); };
-                });
-                const cbEdgeCount = presentPhases.length + 1;
-                for (let i = 0; i < cbEdgeCount; i++) {
-                    diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
+                // A batch-only buildspec has no phases; its batch graph is the diagram
+                if (presentPhases.length || !data.batch) {
+                    html += buildFlowchart(presentPhases.map((phase, idx) => ({
+                        id: `CB${idx}`,
+                        label: phase.replace(/_/g, ' '),
+                        color: phaseColors[idx % phaseColors.length],
+                        scrollTo: `CB${idx}`
+                    })), chainEdges(presentPhases.map((phase, idx) => `CB${idx}`)));
                 }
-                html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
 
                 presentPhases.forEach((phase, idx) => {
                     const phaseData = data.phases[phase];
@@ -735,8 +1455,14 @@
                     html += `<h2 style="background: ${color}; color: white;">🏗️ ${phaseLabel}</h2>`;
 
                     if (phaseData['runtime-versions']) {
-                        const runtimes = Object.entries(phaseData['runtime-versions']).map(([k, v]) => `${k}: ${v}`).join(', ');
-                        html += `<p><strong>⚙️ Runtimes:</strong> <code>${runtimes}</code></p>`;
+                        const runtimes = Object.entries(phaseData['runtime-versions']).map(([k, v]) => `${k}: ${asList(v).join(' / ')}`).join(', ');
+                        html += `<p><strong>⚙️ Runtimes:</strong> <code>${escapeHtml(runtimes)}</code></p>`;
+                    }
+                    if (phaseData['run-as']) {
+                        html += `<p><strong>👤 Run as:</strong> ${escapeHtml(String(phaseData['run-as']))}</p>`;
+                    }
+                    if (phaseData['on-failure']) {
+                        html += `<p class="approval-info">⚠️ On failure: ${escapeHtml(describeOnFailure(String(phaseData['on-failure'])))}</p>`;
                     }
 
                     const renderCommands = (cmds, icon, label) => {
@@ -760,6 +1486,24 @@
                     html += '</div>';
                 });
 
+                if (data.batch) {
+                    html += renderCodeBuildBatch(data.batch);
+                }
+
+                if (data.reports) {
+                    html += '<div class="stage"><h2>📊 Reports</h2>';
+                    Object.entries(data.reports).forEach(([group, report]) => {
+                        const r = report || {};
+                        html += `<div class="job"><h3><code>${escapeHtml(group)}</code></h3>`;
+                        if (r['file-format']) { html += `<p><strong>Format:</strong> ${escapeHtml(String(r['file-format']))}</p>`; }
+                        if (r.files) { html += `<p><strong>Files:</strong> <code>${asList(r.files).map(f => escapeHtml(String(f))).join(', ')}</code></p>`; }
+                        if (r['base-directory']) { html += `<p><strong>Base directory:</strong> <code>${escapeHtml(String(r['base-directory']))}</code></p>`; }
+                        if (r['discard-paths'] !== undefined) { html += `<p><strong>Discard paths:</strong> ${escapeHtml(String(r['discard-paths']))}</p>`; }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
+
                 if (data.artifacts) {
                     html += `<div class="stage" style="border-color: ${phaseColors[4 % phaseColors.length]}; background: linear-gradient(135deg, ${phaseColors[4 % phaseColors.length]}33 0%, ${phaseColors[4 % phaseColors.length]}14 100%);">`;
                     html += `<h2 style="background: ${phaseColors[4 % phaseColors.length]}; color: white;">📦 Artifacts</h2>`;
@@ -777,6 +1521,110 @@
             } catch (error) {
                 showError('Rendering Error', error.message || 'Failed to render AWS CodeBuild visualization.', '<strong>Tip:</strong> There may be an issue with the buildspec structure. Please check your buildspec.yml file.');
             }
+        }
+
+        // CloudFormation values may be intrinsic functions; the YAML tags are stripped
+        // before parsing, so `!Ref X` arrives as "X" and long-form functions as objects
+        function cfnValue(value) {
+            if (value === undefined || value === null) { return ''; }
+            if (typeof value !== 'object') { return String(value).trim(); }
+            if (Array.isArray(value)) { return value.map(cfnValue).join(', '); }
+            const keys = Object.keys(value);
+            if (keys.length === 1 && (keys[0] === 'Ref' || keys[0].startsWith('Fn::'))) {
+                return `${keys[0]}(${cfnValue(value[keys[0]])})`;
+            }
+            return JSON.stringify(value);
+        }
+
+        function renderCodePipelineSettings(props) {
+            const rows = [];
+            if (props.PipelineType) { rows.push(`<p><strong>Type:</strong> ${escapeHtml(cfnValue(props.PipelineType))}</p>`); }
+            if (props.ExecutionMode) {
+                const modes = { QUEUED: 'runs wait in a queue', PARALLEL: 'runs proceed in parallel', SUPERSEDED: 'newer runs replace waiting ones' };
+                const mode = cfnValue(props.ExecutionMode);
+                rows.push(`<p><strong>Execution mode:</strong> ${escapeHtml(mode)}${modes[mode] ? ` (${modes[mode]})` : ''}</p>`);
+            }
+            asList(props.Triggers).forEach(trigger => {
+                const git = (trigger && trigger.GitConfiguration) || {};
+                const filters = [];
+                asList(git.Push).forEach(push => filters.push(`push ${describeGitFilter(push)}`));
+                asList(git.PullRequest).forEach(pr => filters.push(`pull request${pr.Events ? ` (${asList(pr.Events).map(cfnValue).join(', ')})` : ''} ${describeGitFilter(pr)}`));
+                rows.push(`<p><strong>🔔 Trigger:</strong> ${escapeHtml(cfnValue(trigger && trigger.ProviderType))}${git.SourceActionName ? ` on <code>${escapeHtml(cfnValue(git.SourceActionName))}</code>` : ''}${filters.length ? ` — ${filters.map(f => escapeHtml(f.trim())).join('; ')}` : ''}</p>`);
+            });
+            if (Array.isArray(props.Variables) && props.Variables.length) {
+                const vars = props.Variables.map(v => `<code>${escapeHtml(cfnValue(v.Name))}</code>${v.DefaultValue !== undefined ? ` = ${escapeHtml(cfnValue(v.DefaultValue))}` : ''}`);
+                rows.push(`<p><strong>🔧 Variables:</strong> ${vars.join(', ')}</p>`);
+            }
+            if (!rows.length) { return ''; }
+            return `<div class="stage"><h2>⚙️ Pipeline Settings</h2><div class="job">${rows.join('')}</div></div>`;
+        }
+
+        function describeGitFilter(filter) {
+            const parts = [];
+            ['Branches', 'FilePaths', 'Tags'].forEach(kind => {
+                const f = filter && filter[kind];
+                if (!f) { return; }
+                if (f.Includes) { parts.push(`${kind.toLowerCase()} ${asList(f.Includes).map(cfnValue).join(', ')}`); }
+                if (f.Excludes) { parts.push(`excluding ${kind.toLowerCase()} ${asList(f.Excludes).map(cfnValue).join(', ')}`); }
+            });
+            return parts.join(', ');
+        }
+
+        function renderStageConditions(title, block) {
+            if (!block) { return ''; }
+            const parts = [];
+            if (block.Result) {
+                const retry = block.RetryConfiguration && block.RetryConfiguration.RetryMode;
+                parts.push(`result <strong>${escapeHtml(cfnValue(block.Result))}</strong>${retry ? ` (retry ${escapeHtml(cfnValue(retry))})` : ''}`);
+            }
+            asList(block.Conditions).forEach(condition => {
+                const rules = asList(condition && condition.Rules).map(rule => {
+                    const provider = rule.RuleTypeId && rule.RuleTypeId.Provider;
+                    return `${escapeHtml(cfnValue(rule.Name))}${provider ? ` (${escapeHtml(cfnValue(provider))})` : ''}`;
+                });
+                parts.push(`${rules.join(', ') || 'condition'} → ${escapeHtml(cfnValue(condition && condition.Result) || 'evaluate')}`);
+            });
+            return `<p class="approval-info">${title}: ${parts.join('; ')}</p>`;
+        }
+
+        function renderCodePipelineAction(action) {
+            const actionName = cfnValue(action.Name) || 'Action';
+            const typeId = action.ActionTypeId || {};
+            const category = cfnValue(typeId.Category);
+            const provider = cfnValue(typeId.Provider);
+            const config = action.Configuration || {};
+            const sid = 'step_' + stepCounter++;
+            allSteps[sid] = {
+                displayName: actionName,
+                category: typeId.Category,
+                provider: typeId.Provider,
+                owner: typeId.Owner,
+                configuration: action.Configuration,
+                runOrder: action.RunOrder,
+                inputArtifacts: action.InputArtifacts,
+                outputArtifacts: action.OutputArtifacts,
+                script: Array.isArray(action.Commands) ? action.Commands.map(cfnValue).join('\n') : undefined
+            };
+            let html;
+            if (category === 'Approval') {
+                html = `<div class="approval" data-step="${sid}" style="cursor:pointer;"><h4>⏸️ Manual Approval: ${escapeHtml(actionName)}</h4>`;
+                if (config.CustomData) { html += `<p><strong>Instructions:</strong> ${escapeHtml(cfnValue(config.CustomData))}</p>`; }
+                if (config.NotificationArn) { html += `<p><strong>Notify:</strong> <code>${escapeHtml(cfnValue(config.NotificationArn))}</code></p>`; }
+                if (config.ExternalEntityLink) { html += `<p><strong>Review link:</strong> <code>${escapeHtml(cfnValue(config.ExternalEntityLink))}</code></p>`; }
+                return html + '</div>';
+            }
+            html = `<div class="job" data-step="${sid}" style="cursor:pointer;">`;
+            html += `<h3>${escapeHtml(actionName)}${provider ? ` (${escapeHtml(provider)})` : ''}</h3>`;
+            if (category) { html += `<p><strong>Category:</strong> ${escapeHtml(category)}</p>`; }
+            if (Array.isArray(action.Commands) && action.Commands.length) {
+                html += '<ul class="steps">';
+                action.Commands.forEach(cmd => { html += `<li style="cursor:default;">▶️ ${escapeHtml(cfnValue(cmd))}</li>`; });
+                html += '</ul>';
+            }
+            if (Array.isArray(action.OutputVariables) && action.OutputVariables.length) {
+                html += `<p><strong>📤 Output variables:</strong> ${action.OutputVariables.map(v => `<code>${escapeHtml(cfnValue(v))}</code>`).join(', ')}</p>`;
+            }
+            return html + '</div>';
         }
 
         function renderAWSCloudFormation(data) {
@@ -804,30 +1652,18 @@
                     var props = pipelineResource.Properties || {};
                     var pipelineName = typeof props.Name === 'string' ? props.Name : logicalId;
                     var stages = Array.isArray(props.Stages) ? props.Stages : [];
-                    var diagramDirection = layoutPreference === 'vertical' ? 'TD' : (stages.length <= 6 ? 'LR' : 'TD');
-
                     html += '<h3 style="margin-top:24px;font-size:15px;opacity:0.8;">🔀 Pipeline: ' + escapeHtml(pipelineName) + '</h3>';
+                    html += renderCodePipelineSettings(props);
 
-                    var diagram = 'graph ' + diagramDirection + '\nSTART([Start])';
-                    stages.forEach(function(stage, sIdx) {
-                        var sid = 'CFP' + pIdx + '_' + sIdx;
-                        var label = (stage.Name || ('Stage ' + (sIdx + 1))).replace(/"/g, "'");
-                        diagram += ' --> ' + sid + '["' + label + '"]';
-                    });
-                    diagram += ' --> END([End])';
-                    stages.forEach(function(stage, sIdx) {
-                        var sid = 'CFP' + pIdx + '_' + sIdx;
-                        var color = themePalette[sIdx % themePalette.length];
-                        var clickName = 'scrollToCF_' + pIdx + '_' + sIdx;
-                        diagram += '\nstyle ' + sid + ' fill:' + color + ',stroke:' + color + ',color:#fff';
-                        diagram += '\nclick ' + sid + ' ' + clickName;
-                        (function(name, id) { window[name] = function() { scrollToStage(id); }; })(clickName, sid);
-                    });
-                    var edgeCount = stages.length + 1;
-                    for (var i = 0; i < edgeCount; i++) {
-                        diagram += '\nlinkStyle ' + i + ' stroke:' + themeEdgeColor + ',stroke-width:2px,fill:none';
-                    }
-                    html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
+                    var stageIds = stages.map(function(stage, sIdx) { return 'CFP' + pIdx + '_' + sIdx; });
+                    html += buildFlowchart(stages.map(function(stage, sIdx) {
+                        return {
+                            id: stageIds[sIdx],
+                            label: stage.Name || ('Stage ' + (sIdx + 1)),
+                            color: themePalette[sIdx % themePalette.length],
+                            scrollTo: stageIds[sIdx]
+                        };
+                    }), chainEdges(stageIds));
 
                     stages.forEach(function(stage, sIdx) {
                         var sid = 'CFP' + pIdx + '_' + sIdx;
@@ -836,17 +1672,25 @@
                         var actions = Array.isArray(stage.Actions) ? stage.Actions : [];
                         html += '<div id="' + sid + '" class="stage" style="border-color:' + color + ';background:linear-gradient(135deg,' + color + '33 0%,' + color + '14 100%);">';
                         html += '<h2 style="background:' + color + ';color:white;">🔀 ' + escapeHtml(stageName) + '</h2>';
+                        html += renderStageConditions('🚪 Before entry', stage.BeforeEntry);
+                        // Actions with the same RunOrder (default 1) run in parallel
+                        var runOrders = [];
+                        var actionsByOrder = {};
                         actions.forEach(function(action) {
-                            var actionName = action.Name || 'Action';
-                            var typeId = action.ActionTypeId || {};
-                            var providerLabel = typeId.Provider ? ' (' + escapeHtml(typeId.Provider) + ')' : '';
-                            var sid2 = 'step_' + stepCounter++;
-                            allSteps[sid2] = { displayName: actionName, category: typeId.Category, provider: typeId.Provider, owner: typeId.Owner, configuration: action.Configuration, runOrder: action.RunOrder, inputArtifacts: action.InputArtifacts, outputArtifacts: action.OutputArtifacts };
-                            html += '<div class="job" data-step="' + sid2 + '" style="cursor:pointer;">';
-                            html += '<h3>' + escapeHtml(actionName) + providerLabel + '</h3>';
-                            if (action.RunOrder) { html += '<p>Run order: ' + action.RunOrder + '</p>'; }
-                            html += '</div>';
+                            var order = Number(action.RunOrder) || 1;
+                            if (!actionsByOrder[order]) { actionsByOrder[order] = []; runOrders.push(order); }
+                            actionsByOrder[order].push(action);
                         });
+                        runOrders.sort(function(a, b) { return a - b; });
+                        runOrders.forEach(function(order) {
+                            var group = actionsByOrder[order];
+                            if (runOrders.length > 1 || group.length > 1) {
+                                html += '<p><strong>Run order ' + order + '</strong>' + (group.length > 1 ? ' — ' + group.length + ' actions in parallel' : '') + '</p>';
+                            }
+                            group.forEach(function(action) { html += renderCodePipelineAction(action); });
+                        });
+                        html += renderStageConditions('✅ On success', stage.OnSuccess);
+                        html += renderStageConditions('❌ On failure', stage.OnFailure);
                         html += '</div>';
                     });
                 });
@@ -880,6 +1724,39 @@
         }
 
         let bbSelectedPipeline = null;
+
+        function describeCondition(condition) {
+            if (typeof condition === 'string') { return condition; }
+            const changes = condition && condition.changesets;
+            if (changes) {
+                const parts = [];
+                if (changes.includePaths) { parts.push('changes in ' + asList(changes.includePaths).join(', ')); }
+                if (changes.excludePaths) { parts.push('ignoring ' + asList(changes.excludePaths).join(', ')); }
+                if (parts.length) { return parts.join('; '); }
+            }
+            return JSON.stringify(condition);
+        }
+
+        function describeClone(clone) {
+            if (clone.enabled === false) { return 'disabled'; }
+            const parts = [];
+            if (clone.depth !== undefined) { parts.push('depth ' + clone.depth); }
+            if (clone.lfs) { parts.push('LFS'); }
+            if (clone['skip-ssl-verify']) { parts.push('skip SSL verify'); }
+            return parts.join(', ') || 'default';
+        }
+
+        function describeRuntime(runtime) {
+            const cloud = runtime && runtime.cloud;
+            if (cloud) {
+                const parts = [];
+                if (cloud.arch) { parts.push(String(cloud.arch).toUpperCase()); }
+                if (cloud.version) { parts.push('version ' + cloud.version); }
+                if (cloud.atlassian_ip_ranges) { parts.push('Atlassian IP ranges'); }
+                if (parts.length) { return 'cloud ' + parts.join(', '); }
+            }
+            return JSON.stringify(runtime);
+        }
 
         function renderBitbucket(data) {
             try {
@@ -939,6 +1816,19 @@
                 }
                 const selectedValue = bbSelectedPipeline.type + '::' + bbSelectedPipeline.key;
 
+                // A pipeline can be imported from another file or repository instead of listing steps
+                const importRef = (activeList && !Array.isArray(activeList) && typeof activeList === 'object' && activeList.import)
+                    ? activeList.import
+                    : null;
+                if (!Array.isArray(activeList)) { activeList = []; }
+                // Custom pipelines can declare run-time variables as a `- variables:` item
+                const pipelineVariables = [];
+                activeList.forEach(function(item) {
+                    if (item && item.variables) { asList(item.variables).forEach(function(v) { pipelineVariables.push(v); }); }
+                });
+                const definitions = data.definitions || {};
+                const agentDefs = (definitions.agents && typeof definitions.agents === 'object') ? definitions.agents : {};
+
                 // Info grid
                 let html = '<div class="info-grid">';
                 html += '<div class="info-card"><h3>📋 Pipeline Types</h3><p>' + Object.keys(pipelines).length + ' configured</p></div>';
@@ -947,8 +1837,28 @@
                     const imgName = typeof data.image === 'string' ? data.image : data.image.name;
                     html += '<div class="info-card"><h3>🐳 Default Image</h3><p>' + escapeHtml(imgName) + '</p></div>';
                 }
-                if (data.definitions && data.definitions.caches) {
-                    html += '<div class="info-card"><h3>💾 Caches</h3><p>' + Object.keys(data.definitions.caches).length + ' defined</p></div>';
+                if (definitions.caches) {
+                    html += '<div class="info-card"><h3>💾 Caches</h3><p>' + Object.keys(definitions.caches).length + ' defined</p></div>';
+                }
+                if (definitions.services) {
+                    html += '<div class="info-card"><h3>🛠️ Services</h3><p>' + escapeHtml(Object.keys(definitions.services).join(', ')) + '</p></div>';
+                }
+                if (Object.keys(agentDefs).length) {
+                    html += '<div class="info-card"><h3>🤖 Agents</h3><p>' + escapeHtml(Object.keys(agentDefs).join(', ')) + '</p></div>';
+                }
+                if (data.triggers && typeof data.triggers === 'object') {
+                    html += '<div class="info-card"><h3>🔔 Triggers</h3><p>' + Object.keys(data.triggers).length + ' event type(s)</p></div>';
+                }
+                if (data.clone) {
+                    html += '<div class="info-card"><h3>📥 Clone</h3><p>' + escapeHtml(describeClone(data.clone)) + '</p></div>';
+                }
+                if (data.options) {
+                    const opts = [];
+                    if (data.options['max-time']) { opts.push('max-time ' + data.options['max-time'] + ' min'); }
+                    if (data.options.size) { opts.push('size ' + data.options.size); }
+                    if (data.options.docker) { opts.push('docker'); }
+                    if (data.options.runtime) { opts.push(describeRuntime(data.options.runtime)); }
+                    html += '<div class="info-card"><h3>⚙️ Options</h3><p>' + escapeHtml(opts.join(', ') || 'Configured') + '</p></div>';
                 }
                 html += '</div>';
 
@@ -962,6 +1872,32 @@
                 });
                 html += '</select>';
                 html += '</div>';
+
+                if (importRef) {
+                    html += '<div class="stage"><h2>📥 Imported Pipeline</h2><div class="job">';
+                    html += '<p><strong>Source:</strong> <code>' + escapeHtml(String(importRef)) + '</code></p>';
+                    html += '<p class="approval-info">ℹ️ Steps are defined in the imported pipeline and are not shown here</p>';
+                    html += '</div></div>';
+                }
+
+                if (pipelineVariables.length) {
+                    html += '<div class="stage"><h2>🔧 Run-time Variables</h2>';
+                    pipelineVariables.forEach(function(v) {
+                        const variable = (v && typeof v === 'object') ? v : { name: String(v) };
+                        html += '<div class="job"><h3><code>' + escapeHtml(String(variable.name || 'variable')) + '</code></h3>';
+                        if (variable.default !== undefined) {
+                            html += '<p><strong>Default:</strong> <code>' + escapeHtml(String(variable.default)) + '</code></p>';
+                        }
+                        if (Array.isArray(variable['allowed-values'])) {
+                            html += '<p><strong>Allowed values:</strong> ' + variable['allowed-values'].map(function(a) { return escapeHtml(String(a)); }).join(', ') + '</p>';
+                        }
+                        if (variable.description) {
+                            html += '<p>' + escapeHtml(String(variable.description)) + '</p>';
+                        }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
 
                 // Build diagram items from active list
                 const diagramItems = [];
@@ -979,32 +1915,33 @@
                     }
                 });
 
-                let diagramDirection = 'LR';
-                if (layoutPreference === 'vertical') {
-                    diagramDirection = 'TD';
-                } else if (layoutPreference === 'horizontal') {
-                    diagramDirection = 'LR';
-                } else {
-                    diagramDirection = diagramItems.length <= 6 ? 'LR' : 'TD';
-                }
-
+                // Each item is one level of the graph; a parallel group fans out into one node
+                // per step and every node of a level connects to every node of the next level
                 const nodeColors = themePalette;
-                let diagram = 'graph ' + diagramDirection + '\nSTART([Start])';
-                diagramItems.forEach(function(node) {
-                    diagram += ' --> BB' + node.origIdx + '["' + node.label + '"]';
-                });
-                diagram += ' --> END([End])';
-                diagramItems.forEach(function(node, dIdx) {
+                const bbNodes = [];
+                const levels = diagramItems.map(function(node, dIdx) {
+                    const item = activeList[node.origIdx];
                     const color = nodeColors[dIdx % nodeColors.length];
-                    diagram += '\nstyle BB' + node.origIdx + ' fill:' + color + ',stroke:' + color + ',color:#fff';
-                    diagram += '\nclick BB' + node.origIdx + ' scrollToBBNode_' + node.origIdx;
-                    window['scrollToBBNode_' + node.origIdx] = (function(id) { return function() { scrollToStage(id); }; })('BB' + node.origIdx);
-                });
-                const bbEdgeCount = diagramItems.length + 1;
-                for (let i = 0; i < bbEdgeCount; i++) {
-                    diagram += '\nlinkStyle ' + i + ' stroke:' + themeEdgeColor + ',stroke-width:2px,fill:none';
+                    const target = 'BB' + node.origIdx;
+                    let levelNodes;
+                    if (item.parallel) {
+                        const ps = Array.isArray(item.parallel) ? item.parallel : (item.parallel.steps || []);
+                        levelNodes = ps.filter(function(p) { return p.step; }).map(function(p, pIdx) {
+                            return { id: target + '_' + pIdx, label: '⚡ ' + (p.step.name || ('Parallel step ' + (pIdx + 1))), color: color, scrollTo: target };
+                        });
+                    } else {
+                        levelNodes = [{ id: target, label: node.label, color: color, scrollTo: target }];
+                    }
+                    levelNodes.forEach(function(n) { bbNodes.push(n); });
+                    return levelNodes;
+                }).filter(function(level) { return level.length > 0; });
+                const bbEdges = [];
+                for (let i = 1; i < levels.length; i++) {
+                    levels[i - 1].forEach(function(from) {
+                        levels[i].forEach(function(to) { bbEdges.push([from.id, to.id]); });
+                    });
                 }
-                html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
+                html += buildFlowchart(bbNodes, bbEdges);
 
                 // Script entries are usually command strings, but can also be objects
                 // such as `- pipe: atlassian/...` or `- agent: <name>`
@@ -1023,6 +1960,10 @@
                             } else if (entry.agent) {
                                 itemIcon = '🤖';
                                 label = 'agent: ' + String(entry.agent);
+                                const agentDef = agentDefs[entry.agent];
+                                if (agentDef && agentDef.prompt) {
+                                    allSteps[sid] = Object.assign({ displayName: label, prompt: String(agentDef.prompt) }, entry);
+                                }
                             } else {
                                 const firstKey = Object.keys(entry)[0];
                                 const firstValue = firstKey !== undefined ? entry[firstKey] : '';
@@ -1030,7 +1971,7 @@
                                     ? firstKey + ': ' + (typeof firstValue === 'object' ? JSON.stringify(firstValue) : String(firstValue))
                                     : '{}';
                             }
-                            allSteps[sid] = Object.assign({ displayName: label }, entry);
+                            if (!allSteps[sid]) { allSteps[sid] = Object.assign({ displayName: label }, entry); }
                         } else {
                             label = String(entry);
                             allSteps[sid] = { script: label, displayName: label.substring(0, 80) };
@@ -1054,8 +1995,29 @@
                         const imgName = typeof step.image === 'string' ? step.image : step.image.name;
                         out += '<p><strong>🐳 Image:</strong> <code>' + escapeHtml(imgName) + '</code></p>';
                     }
+                    if (step.condition) {
+                        out += '<p><strong>🔀 Condition:</strong> ' + escapeHtml(describeCondition(step.condition)) + '</p>';
+                    }
                     if (step.size) {
                         out += '<p><strong>📐 Size:</strong> ' + escapeHtml(String(step.size)) + '</p>';
+                    }
+                    if (step['runs-on']) {
+                        out += '<p><strong>🖥️ Runs on:</strong> ' + asList(step['runs-on']).map(function(l) { return escapeHtml(String(l)); }).join(', ') + '</p>';
+                    }
+                    if (step.runtime) {
+                        out += '<p><strong>🧬 Runtime:</strong> ' + escapeHtml(describeRuntime(step.runtime)) + '</p>';
+                    }
+                    if (step['max-time']) {
+                        out += '<p><strong>⏱️ Max time:</strong> ' + escapeHtml(String(step['max-time'])) + ' min</p>';
+                    }
+                    if (step.oidc) {
+                        out += '<p><strong>🔐 OIDC:</strong> enabled</p>';
+                    }
+                    if (step.clone) {
+                        out += '<p><strong>📥 Clone:</strong> ' + escapeHtml(describeClone(step.clone)) + '</p>';
+                    }
+                    if (step.auth && step.auth.system && Array.isArray(step.auth.system.scopes)) {
+                        out += '<p><strong>🔑 Auth scopes:</strong> <code>' + step.auth.system.scopes.map(function(sc) { return escapeHtml(String(sc)); }).join(', ') + '</code></p>';
                     }
                     if (step.caches && step.caches.length) {
                         out += '<p><strong>💾 Caches:</strong> ' + step.caches.join(', ') + '</p>';
@@ -1086,6 +2048,9 @@
                         const pSteps = ps.filter(function(p) { return p.step; }).map(function(p) { return p.step; });
                         html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
                         html += '<h2 style="background: ' + color + '; color: white;">⚡ Parallel Steps (' + pSteps.length + ')</h2>';
+                        if (!Array.isArray(item.parallel) && item.parallel['fail-fast']) {
+                            html += '<p class="approval-info">⛔ Fail fast: remaining steps stop when one fails</p>';
+                        }
                         pSteps.forEach(function(step) { html += renderStep(step); });
                         html += '</div>';
                     } else if (item.stage) {
@@ -1093,10 +2058,35 @@
                         const stageName = item.stage.name || ('Stage ' + (node.origIdx + 1));
                         html += '<div id="BB' + node.origIdx + '" class="stage" style="border-color: ' + color + '; background: linear-gradient(135deg, ' + color + '33 0%, ' + color + '14 100%);">';
                         html += '<h2 style="background: ' + color + '; color: white;">📋 ' + escapeHtml(stageName) + '</h2>';
+                        if (item.stage.deployment) {
+                            html += '<div class="approval-badge">🚀 Deployment: ' + escapeHtml(String(item.stage.deployment)) + '</div>';
+                        }
+                        if (item.stage.trigger === 'manual') {
+                            html += '<div class="approval-badge" style="background: linear-gradient(135deg, #FFA500 0%, #FF8C00 100%);">⏸️ Manual Trigger</div>';
+                        }
+                        if (item.stage.condition) {
+                            html += '<p><strong>🔀 Condition:</strong> ' + escapeHtml(describeCondition(item.stage.condition)) + '</p>';
+                        }
                         stageSteps.forEach(function(step) { html += renderStep(step); });
                         html += '</div>';
                     }
                 });
+
+                if (data.triggers && typeof data.triggers === 'object') {
+                    html += '<div class="stage"><h2>🔔 Triggers</h2>';
+                    Object.entries(data.triggers).forEach(function(triggerEntry) {
+                        html += '<div class="job"><h3><code>' + escapeHtml(triggerEntry[0]) + '</code></h3>';
+                        asList(triggerEntry[1]).forEach(function(rule) {
+                            const r = (rule && typeof rule === 'object') ? rule : {};
+                            const targets = asList(r.pipelines).map(function(name) {
+                                return '<a data-bb-select="' + escapeHtml('custom::' + name) + '" style="cursor:pointer; text-decoration:underline;">⚙️ ' + escapeHtml(String(name)) + '</a>';
+                            }).join(', ');
+                            html += '<p>' + (r.condition ? '<code>' + escapeHtml(String(r.condition)) + '</code>' : '<em>always</em>') + ' → ' + (targets || '<em>no pipelines</em>') + '</p>';
+                        });
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
 
                 // Summary cards for non-default pipeline types
                 const typeLabels = { 'branches': '🌿 Branches', 'pull-requests': '🔀 Pull Requests', 'tags': '🏷️ Tags', 'custom': '⚙️ Custom' };
@@ -1111,7 +2101,10 @@
                         Object.entries(typeObj).forEach(function(entry) {
                             const isSelected = bbSelectedPipeline.type === type && bbSelectedPipeline.key === entry[0];
                             const selectedTag = isSelected ? ' <span style="opacity: 0.7; font-size: 11px;">(viewing)</span>' : '';
-                            html += '<div class="job"><h3><code>' + escapeHtml(entry[0]) + '</code>' + selectedTag + '</h3><p>' + countSteps(entry[1]) + ' step(s)</p></div>';
+                            const summary = (entry[1] && !Array.isArray(entry[1]) && entry[1].import)
+                                ? '📥 Imported from <code>' + escapeHtml(String(entry[1].import)) + '</code>'
+                                : countSteps(entry[1]) + ' step(s)';
+                            html += '<div class="job" data-bb-select="' + escapeHtml(type + '::' + entry[0]) + '" style="cursor:pointer;"><h3><code>' + escapeHtml(entry[0]) + '</code>' + selectedTag + '</h3><p>' + summary + '</p></div>';
                         });
                     }
                     html += '</div>';

@@ -1,0 +1,75 @@
+version: 0.2
+
+run-as: codebuild-user
+
+env:
+  shell: bash
+  git-credential-helper: yes
+  variables:
+    APP_NAME: storefront
+  parameter-store:
+    DB_HOST: /storefront/db/host
+  secrets-manager:
+    API_KEY: storefront/api:key
+  exported-variables:
+    - IMAGE_TAG
+
+proxy:
+  upload-artifacts: yes
+  logs: yes
+
+batch:
+  fast-fail: false
+  combine-artifacts: true
+  timeout-in-mins: 60
+  build-graph:
+    - identifier: build_backend
+      buildspec: backend/buildspec.yml
+      env:
+        compute-type: BUILD_GENERAL1_MEDIUM
+    - identifier: build_frontend
+      buildspec: frontend/buildspec.yml
+      env:
+        image: aws/codebuild/standard:8.0
+    - identifier: integration_tests
+      buildspec: tests/buildspec.yml
+      depend-on:
+        - build_backend
+        - build_frontend
+    - identifier: package
+      depend-on:
+        - integration_tests
+      ignore-failure: false
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 26
+      rust: 1.97
+    on-failure: ABORT
+    commands:
+      - npm ci
+  build:
+    run-as: root
+    on-failure: RETRY-2
+    commands:
+      - npm run build
+  post_build:
+    on-failure: CONTINUE
+    commands:
+      - echo Done
+
+reports:
+  unit-tests:
+    files:
+      - junit.xml
+    base-directory: reports
+    file-format: JUNITXML
+
+cache:
+  key: npm-$(codebuild-hash-files package-lock.json)
+  fallback-keys:
+    - npm-
+  action: restore
+  paths:
+    - node_modules/**/*

@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**']
+  pull_request:
+    types: [opened, synchronize]
+  schedule:
+    - cron: '0 6 * * 1-5'
+      timezone: Europe/Amsterdam
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        default: staging
+        description: Where to deploy
+      dry_run:
+        type: boolean
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22, 24]
+        exclude:
+          - os: windows-latest
+            node: 20
+        include:
+          - os: macos-latest
+            node: 24
+    services:
+      postgres:
+        image: postgres:16
+        ports: ['5432:5432']
+        entrypoint: /usr/local/bin/docker-entrypoint.sh
+        command: postgres -c fsync=off
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci && npm test
+      - name: Upload coverage
+        if: ${{ case(matrix.os == 'ubuntu-latest', true, false) }}
+        run: npm run coverage
+
+  security:
+    uses: example/workflows/.github/workflows/security-scan.yml@v2
+    with:
+      severity: high
+    secrets: inherit
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    container:
+      image: node:24
+    environment:
+      name: staging
+      deployment: false
+    continue-on-error: true
+    steps:
+      - run: npm run smoke
+
+  deploy:
+    needs: [test, security]
+    if: github.ref == 'refs/heads/main'
+    runs-on:
+      group: production-runners
+      labels: [self-hosted, linux]
+    concurrency: deploy-production
+    permissions:
+      deployments: write
+    environment:
+      name: production
+      url: https://example.com
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - id: release
+        run: ./release.sh
