@@ -148,6 +148,20 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.4.0
+
+New Features:
+- **Integration test suite** — VS Code integration tests render every sample pipeline and verify platform detection and invalid-YAML handling
+- **CI and Dependabot** — every push/PR runs compile, lint, `npm audit` and the integration tests; weekly dependency update PRs
+
+Security:
+- **Updated `brace-expansion` and `serialize-javascript`** via `npm audit fix` — resolves DoS and XSS advisories
+
+Maintenance:
+- **Bumped `js-yaml`** (4.3.2 → 5.5.0) — webview now loads the bundled `dist/browser/js-yaml.umd.min.js`
+- **Bumped dev tooling** — ESLint 10 (migrated to flat config), TypeScript 6.0, typescript-eslint 8.71, Mocha 12.0.3, `@types/node` 26
+- **Fixed: broken `npm run lint`** that silently blocked `npm test`
+
 ### 1.3.3
 
 Security:

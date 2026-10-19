@@ -5,7 +5,7 @@
 src/**
 out/test/**
 .gitignore
-.eslintrc.json
+eslint.config.mjs
 tsconfig.json
 package-lock.json
 icon.svg
