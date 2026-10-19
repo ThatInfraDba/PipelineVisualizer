@@ -2,6 +2,18 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.5.0] - Unreleased
+
+Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualizer/issues/34)).
+
+### Added
+- **Dependency-graph diagrams** — diagrams now follow the real dependencies instead of always drawing a straight chain. Independent nodes start from `Start` in parallel and nodes nothing depends on lead to `End`. A shared `buildFlowchart` helper in `media/webview.js` replaces the per-platform diagram code, and the automatic layout direction now uses the longest dependency path instead of the node count
+  - **GitHub Actions** — edges from `jobs.<id>.needs`; jobs without `needs` run in parallel, as they do on GitHub
+  - **Azure DevOps** — edges from stage `dependsOn`; a stage without `dependsOn` depends on the previous stage and `dependsOn: []` starts immediately
+  - **GitLab CI/CD** — when any job uses `needs`, the diagram switches to a job-level graph: `needs` edges, `needs: []` starts immediately, and jobs without `needs` wait for every job in the previous stage. Pipelines without `needs` keep the stage chain
+  - **Bitbucket Pipelines** — `parallel` groups fan out into one node per step and join again before the next step (pending since v1.2.0)
+- **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
+
 ## [1.4.1] - 2026-10-19
 
 Fixes found while auditing all supported platforms against their current YAML syntax.

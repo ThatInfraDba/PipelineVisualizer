@@ -137,6 +137,71 @@
             return div.innerHTML;
         }
 
+        function chooseDirection(depth) {
+            if (layoutPreference === 'horizontal') { return 'LR'; }
+            if (layoutPreference === 'vertical') { return 'TD'; }
+            return depth <= 6 ? 'LR' : 'TD';
+        }
+
+        // Builds a Mermaid flowchart from nodes and dependency edges. Nodes without
+        // incoming edges start from START and nodes without outgoing edges lead to END,
+        // so independent nodes render as parallel branches.
+        // nodes: [{ id, label, color, scrollTo }]; edges: [[fromId, toId]]
+        function buildFlowchart(nodes, edges) {
+            const ids = new Set(nodes.map(n => n.id));
+            const seen = new Set();
+            const uniqueEdges = edges.filter(([from, to]) => {
+                const key = from + '>' + to;
+                if (!ids.has(from) || !ids.has(to) || from === to || seen.has(key)) { return false; }
+                seen.add(key);
+                return true;
+            });
+            const hasIncoming = new Set(uniqueEdges.map(e => e[1]));
+            const hasOutgoing = new Set(uniqueEdges.map(e => e[0]));
+
+            // Longest path picks the layout direction; capped iterations tolerate cycles
+            const depth = {};
+            nodes.forEach(n => { depth[n.id] = 1; });
+            for (let i = 0; i < nodes.length; i++) {
+                let changed = false;
+                uniqueEdges.forEach(([from, to]) => {
+                    if (depth[to] < depth[from] + 1) { depth[to] = depth[from] + 1; changed = true; }
+                });
+                if (!changed) { break; }
+            }
+            const maxDepth = nodes.reduce((m, n) => Math.max(m, depth[n.id]), 0);
+
+            let diagram = `graph ${chooseDirection(maxDepth)}\nSTART([Start])`;
+            nodes.forEach(n => { diagram += `\n${n.id}["${String(n.label).replace(/"/g, "'")}"]`; });
+            diagram += '\nEND([End])';
+            if (!nodes.length) { diagram += '\nSTART --> END'; }
+            nodes.forEach(n => { if (!hasIncoming.has(n.id)) { diagram += `\nSTART --> ${n.id}`; } });
+            uniqueEdges.forEach(([from, to]) => { diagram += `\n${from} --> ${to}`; });
+            nodes.forEach(n => { if (!hasOutgoing.has(n.id)) { diagram += `\n${n.id} --> END`; } });
+            nodes.forEach(n => {
+                diagram += `\nstyle ${n.id} fill:${n.color},stroke:${n.color},color:#fff`;
+                if (n.scrollTo) {
+                    const handler = 'pvScrollTo_' + n.id;
+                    window[handler] = function() { scrollToStage(n.scrollTo); };
+                    diagram += `\nclick ${n.id} ${handler}`;
+                }
+            });
+            diagram += `\nlinkStyle default stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
+            return `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+        }
+
+        // Sequential nodes: each one depends on the previous
+        function chainEdges(ids) {
+            const edges = [];
+            for (let i = 1; i < ids.length; i++) { edges.push([ids[i - 1], ids[i]]); }
+            return edges;
+        }
+
+        function asList(value) {
+            if (value === undefined || value === null) { return []; }
+            return Array.isArray(value) ? value : [value];
+        }
+
         function showStepDetails(stepId) {
             const step = allSteps[stepId];
             if (!step) return;
@@ -217,38 +282,27 @@
             if (data.stages) html += `<div class="info-card"><h3>📊 Stages</h3><p>${data.stages.length}</p></div>`;
             html += '</div>';
 
-            let diagramDirection = 'TD';
-            if (layoutPreference === 'horizontal') {
-                diagramDirection = 'LR';
-            } else if (layoutPreference === 'vertical') {
-                diagramDirection = 'TD';
-            } else {
-                diagramDirection = (data.stages && data.stages.length <= 6) ? 'LR' : 'TD';
-            }
-            let diagram = `graph ${diagramDirection}\nSTART([Start])`;
             const stageColors = themePalette;
-            if (data.stages) {
-                data.stages.forEach((stage, idx) => {
-                    const id = `S${idx}`;
-                    const stageLabel = (stage.displayName || stage.stage || 'Stage').replace(/"/g, "'");
-                    diagram += ` --> ${id}["${stageLabel}"]`;
-                });
-            }
-            diagram += ' --> END([End])';
-            if (data.stages) {
-                data.stages.forEach((stage, idx) => {
-                    const id = `S${idx}`;
-                    const color = stageColors[idx % stageColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToStage_${idx}`;
-                    window[`scrollToStage_${idx}`] = function() { scrollToStage(`S${idx}`); };
-                });
-            }
-            const edgeCount = (data.stages ? data.stages.length : 0) + 1;
-            for (let i = 0; i < edgeCount; i++) {
-                diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
-            }
-            html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+            const stages = Array.isArray(data.stages) ? data.stages : [];
+            const stageIdByName = {};
+            stages.forEach((stage, idx) => { if (stage.stage) { stageIdByName[stage.stage] = `S${idx}`; } });
+            // Stages depend on the previous stage unless `dependsOn` says otherwise (`[]` = no dependencies)
+            const stageEdges = [];
+            stages.forEach((stage, idx) => {
+                if (stage.dependsOn === undefined) {
+                    if (idx > 0) { stageEdges.push([`S${idx - 1}`, `S${idx}`]); }
+                } else {
+                    asList(stage.dependsOn).forEach(dep => {
+                        if (stageIdByName[dep]) { stageEdges.push([stageIdByName[dep], `S${idx}`]); }
+                    });
+                }
+            });
+            html += buildFlowchart(stages.map((stage, idx) => ({
+                id: `S${idx}`,
+                label: stage.displayName || stage.stage || (stage.template ? `template: ${stage.template}` : 'Stage'),
+                color: stageColors[idx % stageColors.length],
+                scrollTo: `S${idx}`
+            })), stageEdges);
 
             if (data.stages) {
                 data.stages.forEach((stage, idx) => {
@@ -349,38 +403,23 @@
             if (data.jobs) html += `<div class="info-card"><h3>💼 Jobs</h3><p>${Object.keys(data.jobs).length}</p></div>`;
             html += '</div>';
 
-            let diagramDirection = 'TD';
-            if (layoutPreference === 'horizontal') {
-                diagramDirection = 'LR';
-            } else if (layoutPreference === 'vertical') {
-                diagramDirection = 'TD';
-            } else {
-                diagramDirection = (data.jobs && Object.keys(data.jobs).length <= 6) ? 'LR' : 'TD';
-            }
-            let diagram = `graph ${diagramDirection}\nSTART([Start])`;
             const jobColors = themePalette;
-            if (data.jobs) {
-                Object.keys(data.jobs).forEach((key, idx) => {
-                    const id = `J${idx}`;
-                    const jobLabel = (data.jobs[key].name || key).replace(/"/g, "'");
-                    diagram += ` --> ${id}["${jobLabel}"]`;
+            const jobKeys = data.jobs ? Object.keys(data.jobs) : [];
+            // Jobs run in parallel unless they declare `needs`
+            const jobEdges = [];
+            jobKeys.forEach((key, idx) => {
+                const job = data.jobs[key] || {};
+                asList(job.needs).forEach(dep => {
+                    const depIdx = jobKeys.indexOf(dep);
+                    if (depIdx >= 0) { jobEdges.push([`J${depIdx}`, `J${idx}`]); }
                 });
-            }
-            diagram += ' --> END([End])';
-            if (data.jobs) {
-                Object.keys(data.jobs).forEach((key, idx) => {
-                    const id = `J${idx}`;
-                    const color = jobColors[idx % jobColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToJob_${idx}`;
-                    window[`scrollToJob_${idx}`] = function() { scrollToStage(`J${idx}`); };
-                });
-            }
-            const edgeCount = (data.jobs ? Object.keys(data.jobs).length : 0) + 1;
-            for (let i = 0; i < edgeCount; i++) {
-                diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
-            }
-            html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+            });
+            html += buildFlowchart(jobKeys.map((key, idx) => ({
+                id: `J${idx}`,
+                label: (data.jobs[key] && data.jobs[key].name) || key,
+                color: jobColors[idx % jobColors.length],
+                scrollTo: `J${idx}`
+            })), jobEdges);
 
             if (data.jobs) {
                 Object.entries(data.jobs).forEach(([key, job], idx) => {
@@ -469,35 +508,45 @@
                 }
                 html += '</div>';
 
-                let diagramDirection = 'LR';
-                if (layoutPreference === 'vertical') {
-                    diagramDirection = 'TD';
-                } else if (layoutPreference === 'horizontal') {
-                    diagramDirection = 'LR';
-                } else {
-                    diagramDirection = activeStages.length <= 6 ? 'LR' : 'TD';
-                }
-
                 const stageColors = themePalette;
-                let diagram = `graph ${diagramDirection}\nSTART([Start])`;
-                activeStages.forEach((stage, idx) => {
-                    const id = `GL${idx}`;
-                    const label = stage.replace(/"/g, "'");
-                    diagram += ` --> ${id}["${label}"]`;
-                });
-                diagram += ' --> END([End])';
-                activeStages.forEach((stage, idx) => {
-                    const id = `GL${idx}`;
-                    const color = stageColors[idx % stageColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToGLStage_${idx}`;
-                    window[`scrollToGLStage_${idx}`] = function() { scrollToStage(`GL${idx}`); };
-                });
-                const glEdgeCount = activeStages.length + 1;
-                for (let i = 0; i < glEdgeCount; i++) {
-                    diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
+                const usesNeeds = jobEntries.some(([, job]) => job.needs !== undefined);
+                if (usesNeeds) {
+                    // Job-level graph: `needs` overrides stage ordering (`needs: []` starts immediately);
+                    // jobs without `needs` wait for every job in the previous stage
+                    const jobNodes = [];
+                    const jobNodeId = {};
+                    activeStages.forEach((stage, sIdx) => {
+                        jobsByStage[stage].forEach(({ key }) => {
+                            const id = `GLJ${jobNodes.length}`;
+                            jobNodeId[key] = id;
+                            jobNodes.push({ id, label: key, color: stageColors[sIdx % stageColors.length], scrollTo: `GL${sIdx}` });
+                        });
+                    });
+                    const jobEdges = [];
+                    activeStages.forEach((stage, sIdx) => {
+                        jobsByStage[stage].forEach(({ key, job }) => {
+                            if (job.needs !== undefined) {
+                                asList(job.needs).forEach(need => {
+                                    const needName = typeof need === 'string' ? need : (need && need.job);
+                                    if (jobNodeId[needName]) { jobEdges.push([jobNodeId[needName], jobNodeId[key]]); }
+                                });
+                            } else if (sIdx > 0) {
+                                jobsByStage[activeStages[sIdx - 1]].forEach(prev => {
+                                    jobEdges.push([jobNodeId[prev.key], jobNodeId[key]]);
+                                });
+                            }
+                        });
+                    });
+                    html += buildFlowchart(jobNodes, jobEdges);
+                } else {
+                    const stageIds = activeStages.map((stage, idx) => `GL${idx}`);
+                    html += buildFlowchart(activeStages.map((stage, idx) => ({
+                        id: `GL${idx}`,
+                        label: stage,
+                        color: stageColors[idx % stageColors.length],
+                        scrollTo: `GL${idx}`
+                    })), chainEdges(stageIds));
                 }
-                html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
 
                 if (specInputs) {
                     const inputsColor = stageColors[(activeStages.length) % stageColors.length];
@@ -696,35 +745,13 @@
 
                 html += '</div>';
 
-                let diagramDirection = 'LR';
-                if (layoutPreference === 'vertical') {
-                    diagramDirection = 'TD';
-                } else if (layoutPreference === 'horizontal') {
-                    diagramDirection = 'LR';
-                } else {
-                    diagramDirection = presentPhases.length <= 6 ? 'LR' : 'TD';
-                }
-
                 const phaseColors = themePalette;
-                let diagram = `graph ${diagramDirection}\nSTART([Start])`;
-                presentPhases.forEach((phase, idx) => {
-                    const id = `CB${idx}`;
-                    const label = phase.replace(/_/g, ' ');
-                    diagram += ` --> ${id}["${label}"]`;
-                });
-                diagram += ' --> END([End])';
-                presentPhases.forEach((phase, idx) => {
-                    const id = `CB${idx}`;
-                    const color = phaseColors[idx % phaseColors.length];
-                    diagram += `\nstyle ${id} fill:${color},stroke:${color},color:#fff`;
-                    diagram += `\nclick ${id} scrollToCBPhase_${idx}`;
-                    window[`scrollToCBPhase_${idx}`] = function() { scrollToStage(`CB${idx}`); };
-                });
-                const cbEdgeCount = presentPhases.length + 1;
-                for (let i = 0; i < cbEdgeCount; i++) {
-                    diagram += `\nlinkStyle ${i} stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
-                }
-                html += `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
+                html += buildFlowchart(presentPhases.map((phase, idx) => ({
+                    id: `CB${idx}`,
+                    label: phase.replace(/_/g, ' '),
+                    color: phaseColors[idx % phaseColors.length],
+                    scrollTo: `CB${idx}`
+                })), chainEdges(presentPhases.map((phase, idx) => `CB${idx}`)));
 
                 presentPhases.forEach((phase, idx) => {
                     const phaseData = data.phases[phase];
@@ -804,30 +831,17 @@
                     var props = pipelineResource.Properties || {};
                     var pipelineName = typeof props.Name === 'string' ? props.Name : logicalId;
                     var stages = Array.isArray(props.Stages) ? props.Stages : [];
-                    var diagramDirection = layoutPreference === 'vertical' ? 'TD' : (stages.length <= 6 ? 'LR' : 'TD');
-
                     html += '<h3 style="margin-top:24px;font-size:15px;opacity:0.8;">🔀 Pipeline: ' + escapeHtml(pipelineName) + '</h3>';
 
-                    var diagram = 'graph ' + diagramDirection + '\nSTART([Start])';
-                    stages.forEach(function(stage, sIdx) {
-                        var sid = 'CFP' + pIdx + '_' + sIdx;
-                        var label = (stage.Name || ('Stage ' + (sIdx + 1))).replace(/"/g, "'");
-                        diagram += ' --> ' + sid + '["' + label + '"]';
-                    });
-                    diagram += ' --> END([End])';
-                    stages.forEach(function(stage, sIdx) {
-                        var sid = 'CFP' + pIdx + '_' + sIdx;
-                        var color = themePalette[sIdx % themePalette.length];
-                        var clickName = 'scrollToCF_' + pIdx + '_' + sIdx;
-                        diagram += '\nstyle ' + sid + ' fill:' + color + ',stroke:' + color + ',color:#fff';
-                        diagram += '\nclick ' + sid + ' ' + clickName;
-                        (function(name, id) { window[name] = function() { scrollToStage(id); }; })(clickName, sid);
-                    });
-                    var edgeCount = stages.length + 1;
-                    for (var i = 0; i < edgeCount; i++) {
-                        diagram += '\nlinkStyle ' + i + ' stroke:' + themeEdgeColor + ',stroke-width:2px,fill:none';
-                    }
-                    html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
+                    var stageIds = stages.map(function(stage, sIdx) { return 'CFP' + pIdx + '_' + sIdx; });
+                    html += buildFlowchart(stages.map(function(stage, sIdx) {
+                        return {
+                            id: stageIds[sIdx],
+                            label: stage.Name || ('Stage ' + (sIdx + 1)),
+                            color: themePalette[sIdx % themePalette.length],
+                            scrollTo: stageIds[sIdx]
+                        };
+                    }), chainEdges(stageIds));
 
                     stages.forEach(function(stage, sIdx) {
                         var sid = 'CFP' + pIdx + '_' + sIdx;
@@ -979,32 +993,33 @@
                     }
                 });
 
-                let diagramDirection = 'LR';
-                if (layoutPreference === 'vertical') {
-                    diagramDirection = 'TD';
-                } else if (layoutPreference === 'horizontal') {
-                    diagramDirection = 'LR';
-                } else {
-                    diagramDirection = diagramItems.length <= 6 ? 'LR' : 'TD';
-                }
-
+                // Each item is one level of the graph; a parallel group fans out into one node
+                // per step and every node of a level connects to every node of the next level
                 const nodeColors = themePalette;
-                let diagram = 'graph ' + diagramDirection + '\nSTART([Start])';
-                diagramItems.forEach(function(node) {
-                    diagram += ' --> BB' + node.origIdx + '["' + node.label + '"]';
-                });
-                diagram += ' --> END([End])';
-                diagramItems.forEach(function(node, dIdx) {
+                const bbNodes = [];
+                const levels = diagramItems.map(function(node, dIdx) {
+                    const item = activeList[node.origIdx];
                     const color = nodeColors[dIdx % nodeColors.length];
-                    diagram += '\nstyle BB' + node.origIdx + ' fill:' + color + ',stroke:' + color + ',color:#fff';
-                    diagram += '\nclick BB' + node.origIdx + ' scrollToBBNode_' + node.origIdx;
-                    window['scrollToBBNode_' + node.origIdx] = (function(id) { return function() { scrollToStage(id); }; })('BB' + node.origIdx);
-                });
-                const bbEdgeCount = diagramItems.length + 1;
-                for (let i = 0; i < bbEdgeCount; i++) {
-                    diagram += '\nlinkStyle ' + i + ' stroke:' + themeEdgeColor + ',stroke-width:2px,fill:none';
+                    const target = 'BB' + node.origIdx;
+                    let levelNodes;
+                    if (item.parallel) {
+                        const ps = Array.isArray(item.parallel) ? item.parallel : (item.parallel.steps || []);
+                        levelNodes = ps.filter(function(p) { return p.step; }).map(function(p, pIdx) {
+                            return { id: target + '_' + pIdx, label: '⚡ ' + (p.step.name || ('Parallel step ' + (pIdx + 1))), color: color, scrollTo: target };
+                        });
+                    } else {
+                        levelNodes = [{ id: target, label: node.label, color: color, scrollTo: target }];
+                    }
+                    levelNodes.forEach(function(n) { bbNodes.push(n); });
+                    return levelNodes;
+                }).filter(function(level) { return level.length > 0; });
+                const bbEdges = [];
+                for (let i = 1; i < levels.length; i++) {
+                    levels[i - 1].forEach(function(from) {
+                        levels[i].forEach(function(to) { bbEdges.push([from.id, to.id]); });
+                    });
                 }
-                html += '<div class="mermaid-container"><div class="mermaid">' + diagram + '</div></div>';
+                html += buildFlowchart(bbNodes, bbEdges);
 
                 // Script entries are usually command strings, but can also be objects
                 // such as `- pipe: atlassian/...` or `- agent: <name>`
