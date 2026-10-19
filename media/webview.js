@@ -941,6 +941,136 @@
             return html;
         }
 
+        const BATCH_TYPES = ['build-graph', 'build-list', 'build-matrix', 'build-fanout'];
+
+        // ABORT | CONTINUE | RETRY | RETRY-<count> | RETRY-<regex> | RETRY-<count>-<regex>
+        function describeOnFailure(value) {
+            const retry = value.match(/^RETRY(?:-(\d+))?(?:-(.+))?$/);
+            if (retry) {
+                const count = retry[1] ? `up to ${retry[1]} times` : 'up to 3 times';
+                return `retry ${count}${retry[2] ? ` when the error matches /${retry[2]}/` : ''}`;
+            }
+            if (value === 'CONTINUE') { return 'continue with the next phase'; }
+            if (value === 'ABORT') { return 'abort the build'; }
+            return value;
+        }
+
+        // Top-level env / cache / proxy settings that apply to the whole build
+        function renderCodeBuildSettings(data) {
+            const rows = [];
+            const env = data.env || {};
+            if (env['git-credential-helper'] !== undefined) {
+                rows.push(`<p><strong>🔐 Git credential helper:</strong> ${escapeHtml(String(env['git-credential-helper']))}</p>`);
+            }
+            if (env.variables) {
+                rows.push(`<p><strong>🔧 Variables:</strong> ${Object.keys(env.variables).map(v => `<code>${escapeHtml(v)}</code>`).join(', ')}</p>`);
+            }
+            if (env['parameter-store']) {
+                rows.push(`<p><strong>🔑 Parameter Store:</strong> ${Object.keys(env['parameter-store']).map(v => `<code>${escapeHtml(v)}</code>`).join(', ')}</p>`);
+            }
+            if (env['secrets-manager']) {
+                rows.push(`<p><strong>🔑 Secrets Manager:</strong> ${Object.keys(env['secrets-manager']).map(v => `<code>${escapeHtml(v)}</code>`).join(', ')}</p>`);
+            }
+            if (env['exported-variables']) {
+                rows.push(`<p><strong>📤 Exported:</strong> ${asList(env['exported-variables']).map(v => `<code>${escapeHtml(String(v))}</code>`).join(', ')}</p>`);
+            }
+            const cache = data.cache || {};
+            if (cache.key || cache['fallback-keys'] || cache.action || cache.paths) {
+                const parts = [];
+                if (cache.key) { parts.push(`key <code>${escapeHtml(String(cache.key))}</code>`); }
+                if (cache['fallback-keys']) { parts.push(`fallback ${asList(cache['fallback-keys']).map(k => `<code>${escapeHtml(String(k))}</code>`).join(', ')}`); }
+                if (cache.action) { parts.push(`action ${escapeHtml(String(cache.action))}`); }
+                if (cache.paths) { parts.push(`paths ${asList(cache.paths).map(p => `<code>${escapeHtml(String(p))}</code>`).join(', ')}`); }
+                rows.push(`<p><strong>💾 Cache:</strong> ${parts.join('; ')}</p>`);
+            }
+            if (data.proxy) {
+                const proxy = Object.entries(data.proxy).map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(String(v))}`).join(', ');
+                rows.push(`<p><strong>🌐 Proxy:</strong> ${proxy}</p>`);
+            }
+            if (!rows.length) { return ''; }
+            return `<div class="stage"><h2>⚙️ Build Settings</h2><div class="job">${rows.join('')}</div></div>`;
+        }
+
+        function describeBatchBuild(build) {
+            const b = build || {};
+            const env = b.env || {};
+            const parts = [];
+            if (b.buildspec) { parts.push(`buildspec <code>${escapeHtml(String(b.buildspec))}</code>`); }
+            if (env['compute-type']) { parts.push(escapeHtml(asList(env['compute-type']).join(' | '))); }
+            if (env.image) { parts.push(`<code>${escapeHtml(asList(env.image).join(' | '))}</code>`); }
+            if (env.variables) {
+                parts.push(Object.entries(env.variables).map(([k, v]) => `${escapeHtml(k)}=${escapeHtml(asList(v).join(' | '))}`).join(', '));
+            }
+            if (b['ignore-failure']) { parts.push('ignore failure'); }
+            if (b['debug-session']) { parts.push('debug session'); }
+            return parts.join(' · ');
+        }
+
+        function renderCodeBuildBatch(batch) {
+            let html = '<div class="stage"><h2>🧩 Batch Build</h2>';
+            const options = [];
+            if (batch['fast-fail'] !== undefined) { options.push(`fast-fail: ${batch['fast-fail']}`); }
+            if (batch['combine-artifacts'] !== undefined) { options.push(`combine-artifacts: ${batch['combine-artifacts']}`); }
+            if (batch['timeout-in-mins']) { options.push(`timeout: ${batch['timeout-in-mins']} min`); }
+            if (batch['service-role']) { options.push(`service role: ${batch['service-role']}`); }
+            if (options.length) { html += `<p>${escapeHtml(options.join(' · '))}</p>`; }
+
+            const builds = asList(batch['build-graph'] || batch['build-list']);
+            if (builds.length) {
+                // build-graph orders builds with depend-on; build-list runs them all in parallel
+                const ids = {};
+                builds.forEach((b, idx) => { if (b && b.identifier) { ids[b.identifier] = `CBB${idx}`; } });
+                const edges = [];
+                if (batch['build-graph']) {
+                    builds.forEach((b, idx) => {
+                        asList(b && b['depend-on']).forEach(dep => { if (ids[dep]) { edges.push([ids[dep], `CBB${idx}`]); } });
+                    });
+                }
+                html += buildFlowchart(builds.map((b, idx) => ({
+                    id: `CBB${idx}`,
+                    label: (b && b.identifier) || `Build ${idx + 1}`,
+                    color: themePalette[idx % themePalette.length],
+                    scrollTo: `CBB${idx}_card`
+                })), edges);
+                builds.forEach((b, idx) => {
+                    html += `<div id="CBB${idx}_card" class="job"><h3><code>${escapeHtml(String((b && b.identifier) || `Build ${idx + 1}`))}</code></h3>`;
+                    const details = describeBatchBuild(b);
+                    if (details) { html += `<p>${details}</p>`; }
+                    if (b && b['depend-on']) { html += `<p><strong>Depends on:</strong> ${asList(b['depend-on']).map(d => `<code>${escapeHtml(String(d))}</code>`).join(', ')}</p>`; }
+                    html += '</div>';
+                });
+            }
+
+            if (batch['build-matrix']) {
+                const matrix = batch['build-matrix'];
+                const dynamic = matrix.dynamic || {};
+                const dimensions = [];
+                if (dynamic.buildspec) { dimensions.push(['buildspec', asList(dynamic.buildspec)]); }
+                const dynEnv = dynamic.env || {};
+                ['compute-type', 'image', 'type'].forEach(k => { if (dynEnv[k]) { dimensions.push([k, asList(dynEnv[k])]); } });
+                Object.entries(dynEnv.variables || {}).forEach(([k, v]) => dimensions.push([k, asList(v)]));
+                const combinations = dimensions.reduce((total, [, values]) => total * values.length, 1);
+                html += `<div class="job"><h3>Matrix: ${dimensions.length ? combinations : 0} build(s)</h3>`;
+                dimensions.forEach(([k, values]) => {
+                    html += `<p><strong>${escapeHtml(k)}:</strong> ${values.map(v => `<code>${escapeHtml(String(v))}</code>`).join(' | ')}</p>`;
+                });
+                if (matrix.static) {
+                    const staticDetails = describeBatchBuild(matrix.static);
+                    if (staticDetails) { html += `<p><strong>Shared:</strong> ${staticDetails}</p>`; }
+                }
+                html += '</div>';
+            }
+
+            if (batch['build-fanout']) {
+                const fanout = batch['build-fanout'];
+                html += `<div class="job"><h3>Fan-out: ${escapeHtml(String(fanout.parallelism || '?'))} parallel build(s)</h3>`;
+                if (fanout['ignore-failure']) { html += '<p>Ignore failure: true</p>'; }
+                html += '<p class="approval-info">ℹ️ Tests are split across the parallel builds</p></div>';
+            }
+
+            return html + '</div>';
+        }
+
         function renderAWSCodeBuild(data) {
             try {
                 if (!data) {
@@ -951,9 +1081,19 @@
                 const PHASE_ORDER = ['install', 'pre_build', 'build', 'post_build'];
                 const presentPhases = PHASE_ORDER.filter(p => data.phases && data.phases[p]);
 
-                let html = `<p><strong>Buildspec version:</strong> ${data.version || 'Not specified'}</p>`;
+                let html = `<p><strong>Buildspec version:</strong> ${escapeHtml(String(data.version || 'Not specified'))}</p>`;
                 html += '<div class="info-grid">';
                 html += `<div class="info-card"><h3>🔧 Phases</h3><p>${presentPhases.length} defined</p></div>`;
+                if (data['run-as']) {
+                    html += `<div class="info-card"><h3>👤 Run as</h3><p>${escapeHtml(String(data['run-as']))}</p></div>`;
+                }
+                if (data.env && data.env.shell) {
+                    html += `<div class="info-card"><h3>🐚 Shell</h3><p>${escapeHtml(String(data.env.shell))}</p></div>`;
+                }
+                if (data.batch) {
+                    const batchType = BATCH_TYPES.find(t => data.batch[t]);
+                    html += `<div class="info-card"><h3>🧩 Batch</h3><p>${escapeHtml(batchType || 'Configured')}</p></div>`;
+                }
 
                 const secondaryArtifacts = (data.artifacts && data.artifacts['secondary-artifacts'] && typeof data.artifacts['secondary-artifacts'] === 'object')
                     ? Object.entries(data.artifacts['secondary-artifacts'])
@@ -977,7 +1117,7 @@
                 }
 
                 if (data.cache && data.cache.paths) {
-                    html += `<div class="info-card"><h3>💾 Cache</h3><p>${data.cache.paths.length} path(s)</p></div>`;
+                    html += `<div class="info-card"><h3>💾 Cache</h3><p>${asList(data.cache.paths).length} path(s)</p></div>`;
                 }
 
                 if (data.reports) {
@@ -986,13 +1126,18 @@
 
                 html += '</div>';
 
+                html += renderCodeBuildSettings(data);
+
                 const phaseColors = themePalette;
-                html += buildFlowchart(presentPhases.map((phase, idx) => ({
-                    id: `CB${idx}`,
-                    label: phase.replace(/_/g, ' '),
-                    color: phaseColors[idx % phaseColors.length],
-                    scrollTo: `CB${idx}`
-                })), chainEdges(presentPhases.map((phase, idx) => `CB${idx}`)));
+                // A batch-only buildspec has no phases; its batch graph is the diagram
+                if (presentPhases.length || !data.batch) {
+                    html += buildFlowchart(presentPhases.map((phase, idx) => ({
+                        id: `CB${idx}`,
+                        label: phase.replace(/_/g, ' '),
+                        color: phaseColors[idx % phaseColors.length],
+                        scrollTo: `CB${idx}`
+                    })), chainEdges(presentPhases.map((phase, idx) => `CB${idx}`)));
+                }
 
                 presentPhases.forEach((phase, idx) => {
                     const phaseData = data.phases[phase];
@@ -1003,8 +1148,14 @@
                     html += `<h2 style="background: ${color}; color: white;">🏗️ ${phaseLabel}</h2>`;
 
                     if (phaseData['runtime-versions']) {
-                        const runtimes = Object.entries(phaseData['runtime-versions']).map(([k, v]) => `${k}: ${v}`).join(', ');
-                        html += `<p><strong>⚙️ Runtimes:</strong> <code>${runtimes}</code></p>`;
+                        const runtimes = Object.entries(phaseData['runtime-versions']).map(([k, v]) => `${k}: ${asList(v).join(' / ')}`).join(', ');
+                        html += `<p><strong>⚙️ Runtimes:</strong> <code>${escapeHtml(runtimes)}</code></p>`;
+                    }
+                    if (phaseData['run-as']) {
+                        html += `<p><strong>👤 Run as:</strong> ${escapeHtml(String(phaseData['run-as']))}</p>`;
+                    }
+                    if (phaseData['on-failure']) {
+                        html += `<p class="approval-info">⚠️ On failure: ${escapeHtml(describeOnFailure(String(phaseData['on-failure'])))}</p>`;
                     }
 
                     const renderCommands = (cmds, icon, label) => {
@@ -1027,6 +1178,24 @@
 
                     html += '</div>';
                 });
+
+                if (data.batch) {
+                    html += renderCodeBuildBatch(data.batch);
+                }
+
+                if (data.reports) {
+                    html += '<div class="stage"><h2>📊 Reports</h2>';
+                    Object.entries(data.reports).forEach(([group, report]) => {
+                        const r = report || {};
+                        html += `<div class="job"><h3><code>${escapeHtml(group)}</code></h3>`;
+                        if (r['file-format']) { html += `<p><strong>Format:</strong> ${escapeHtml(String(r['file-format']))}</p>`; }
+                        if (r.files) { html += `<p><strong>Files:</strong> <code>${asList(r.files).map(f => escapeHtml(String(f))).join(', ')}</code></p>`; }
+                        if (r['base-directory']) { html += `<p><strong>Base directory:</strong> <code>${escapeHtml(String(r['base-directory']))}</code></p>`; }
+                        if (r['discard-paths'] !== undefined) { html += `<p><strong>Discard paths:</strong> ${escapeHtml(String(r['discard-paths']))}</p>`; }
+                        html += '</div>';
+                    });
+                    html += '</div>';
+                }
 
                 if (data.artifacts) {
                     html += `<div class="stage" style="border-color: ${phaseColors[4 % phaseColors.length]}; background: linear-gradient(135deg, ${phaseColors[4 % phaseColors.length]}33 0%, ${phaseColors[4 % phaseColors.length]}14 100%);">`;

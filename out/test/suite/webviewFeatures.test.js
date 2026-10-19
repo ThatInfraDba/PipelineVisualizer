@@ -116,6 +116,66 @@ suite('GitLab CI/CD features', () => {
         assertIncludesAll(html, ['Conditional values', 'options large, xlarge, default <code>large</code>', 'otherwise → default <code>small</code>', '<code>["small"]</code>']);
     });
 });
+suite('AWS CodeBuild features', () => {
+    const sample = (0, webviewHarness_1.readSample)('codebuild-batch.yml');
+    test('build-graph batch renders a dependency graph', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('aws-codebuild', sample);
+        (0, webviewHarness_1.assertRendered)(html);
+        const diagrams = [...html.matchAll(/<div class="mermaid">([\s\S]*?)<\/div>/g)].map(m => m[1]);
+        assert.strictEqual(diagrams.length, 2, 'Expected phase and batch diagrams');
+        const batchDiagram = diagrams[1].split('\n');
+        for (const edge of ['START --> CBB0', 'START --> CBB1', 'CBB0 --> CBB2', 'CBB1 --> CBB2', 'CBB2 --> CBB3', 'CBB3 --> END']) {
+            assert.ok(batchDiagram.includes(edge), `Expected batch edge ${edge}`);
+        }
+        assertIncludesAll(html, [
+            '🧩 Batch',
+            'build-graph',
+            'fast-fail: false · combine-artifacts: true · timeout: 60 min',
+            'buildspec <code>backend/buildspec.yml</code> · BUILD_GENERAL1_MEDIUM',
+            'Depends on:</strong> <code>build_backend</code>, <code>build_frontend</code>'
+        ]);
+    });
+    test('shows phase on-failure / run-as and build settings', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('aws-codebuild', sample);
+        assertIncludesAll(html, [
+            '👤 Run as</h3><p>codebuild-user',
+            '🐚 Shell</h3><p>bash',
+            'nodejs: 26, rust: 1.97',
+            'On failure: abort the build',
+            'On failure: retry up to 2 times',
+            'On failure: continue with the next phase',
+            '👤 Run as:</strong> root',
+            '🔐 Git credential helper:</strong> yes',
+            '<code>DB_HOST</code>',
+            '<code>API_KEY</code>',
+            '<code>IMAGE_TAG</code>',
+            'fallback <code>npm-</code>; action restore',
+            'upload-artifacts: yes',
+            '<code>unit-tests</code>',
+            'Format:</strong> JUNITXML'
+        ]);
+    });
+    test('build-matrix and build-fanout are summarised', () => {
+        const matrixHtml = (0, webviewHarness_1.renderInWebview)('aws-codebuild', [
+            'version: 0.2',
+            'batch:',
+            '  build-matrix:',
+            '    static:',
+            '      ignore-failure: false',
+            '    dynamic:',
+            '      buildspec: [a.yml, b.yml]',
+            '      env:',
+            '        image: [img1, img2, img3]',
+            '        variables:',
+            '          MODE: [debug, release]'
+        ].join('\n'));
+        (0, webviewHarness_1.assertRendered)(matrixHtml);
+        assertIncludesAll(matrixHtml, ['Matrix: 12 build(s)', '<code>img1</code> | <code>img2</code> | <code>img3</code>']);
+        assert.ok(!matrixHtml.includes('START --> END'), 'Batch-only buildspec should not draw an empty phase diagram');
+        const fanoutHtml = (0, webviewHarness_1.renderInWebview)('aws-codebuild', 'version: 0.2\nbatch:\n  build-fanout:\n    parallelism: 5\n');
+        assertIncludesAll(fanoutHtml, ['Fan-out: 5 parallel build(s)']);
+    });
+});
 suite('Bitbucket Pipelines features', () => {
     const sample = (0, webviewHarness_1.readSample)('bitbucket-advanced.yml');
     test('shows triggers, agents, clone, options and services', () => {

@@ -32,6 +32,13 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **`spec:inputs`** — `regex` and conditional `rules` (GitLab 18.7) with their `options` / `default`; array defaults (GitLab 19.0) shown as JSON
   - Job names and script lines are now HTML-escaped
   - New sample `samples/advanced.gitlab-ci.yml`
+- **AWS CodeBuild**
+  - **Batch builds** (`batch:`) — `build-graph` renders as its own dependency graph from `depend-on`, `build-list` as parallel builds, `build-matrix` with its dimensions and build count, `build-fanout` with its parallelism; plus `fast-fail`, `combine-artifacts`, `timeout-in-mins`, `service-role`. Batch-only buildspecs are now detected as CodeBuild
+  - **Phase `on-failure`** (`ABORT`, `CONTINUE`, `RETRY`, `RETRY-<count>`, `RETRY-<regex>`) and phase `run-as`
+  - **Build settings** — top-level `run-as`, `env.shell`, `env.git-credential-helper`, variable / Parameter Store / Secrets Manager / exported variable names, `proxy`, and `cache` `key` / `fallback-keys` / `action` / `paths`
+  - **Reports** — each report group with its `file-format`, `files`, `base-directory`
+  - Runtime versions accept lists and are HTML-escaped
+  - New sample `samples/codebuild-batch.yml`
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19

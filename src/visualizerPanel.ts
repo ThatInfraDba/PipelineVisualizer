@@ -482,6 +482,11 @@ export class PipelineVisualizerPanel {
 		if (data.phases && typeof data.phases === 'object' && Object.keys(data.phases).some(k => CB_PHASES.has(k))) {
 			return 'aws-codebuild';
 		}
+		// AWS CodeBuild batch buildspec, which may have no phases of its own
+		const CB_BATCH = ['build-graph', 'build-list', 'build-matrix', 'build-fanout'];
+		if (data.batch && typeof data.batch === 'object' && CB_BATCH.some(k => k in data.batch)) {
+			return 'aws-codebuild';
+		}
 		// Bitbucket Pipelines: 'pipelines' is a unique top-level key
 		if (data.pipelines) { return 'bitbucket'; }
 		// Azure-definitive markers

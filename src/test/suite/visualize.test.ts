@@ -28,6 +28,7 @@ const SAMPLES: SampleCase[] = [
 	{ file: 'gitlab-component.yml', expectedBadge: 'GitLab CI' },
 	{ file: 'advanced.gitlab-ci.yml', expectedBadge: 'GitLab CI' },
 	{ file: 'awsbuildspec-sample.yml', expectedBadge: 'AWS CodeBuild' },
+	{ file: 'codebuild-batch.yml', expectedBadge: 'AWS CodeBuild' },
 	{ file: 'awscodebuild-pipeline.yaml', expectedBadge: 'AWS CloudFormation' },
 	{ file: 'bitbucket-pipeline.yaml', expectedBadge: 'Bitbucket Pipelines' },
 	{ file: 'bitbucket-pipelines.yml', expectedBadge: 'Bitbucket Pipelines' },
