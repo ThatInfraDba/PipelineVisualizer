@@ -47,6 +47,15 @@ Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualize
   - **Manual approval actions** (`Category: Approval`) render as approval gates with `CustomData`, `NotificationArn` and `ExternalEntityLink`
   - Long-form intrinsic functions (`Ref`, `Fn::*`) display as `Ref(X)` / `Fn::GetAtt(...)` instead of `[object Object]`
   - New sample `samples/codepipeline-v2.yaml`
+- **GitHub Actions**
+  - **Reusable workflow jobs** (`jobs.<id>.uses`) show the called workflow, `with` values and `secrets` (including `inherit`) instead of an empty job
+  - **`strategy`** — matrix dimensions, combination count after `exclude` / `include`, `fail-fast`, `max-parallel`
+  - **Trigger details** — `schedule` crons with their `timezone` (new in 2026; UTC otherwise), branch / tag / path / type filters, `workflow_dispatch` and `workflow_call` inputs (type, required, default, options), `workflow_call` secrets and outputs
+  - **Environments with `deployment: false`** (new in 2026) are shown as using the environment's secrets and variables, not as a protected deployment
+  - **Service containers** — image, ports, and the `entrypoint` / `command` overrides (new in 2026)
+  - **Job settings** — `if` (including `case()` expressions, shown verbatim), `container`, `concurrency`, `permissions`, `timeout-minutes`, `continue-on-error`, `outputs`; workflow-level `concurrency` and `permissions` cards; `runs-on` groups / label lists
+  - Steps show their `if` condition; the step popup adds the condition and `with` inputs
+  - New sample `samples/github-advanced.yaml`
 - **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
 
 ## [1.4.1] - 2026-10-19

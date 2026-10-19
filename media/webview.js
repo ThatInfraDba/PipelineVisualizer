@@ -220,6 +220,8 @@
                 if (step.name) html += `<dt>📝 Name</dt><dd>${step.name}</dd>`;
                 if (step.uses) html += `<dt>🔧 Uses</dt><dd><code>${step.uses}</code></dd>`;
                 if (step.run) html += `<dt>💻 Script</dt><dd><div class="code-block">${escapeHtml(step.run)}</div></dd>`;
+                if (step.if !== undefined) html += `<dt>🔀 Condition</dt><dd><code>${escapeHtml(String(step.if))}</code></dd>`;
+                if (step.with) html += `<dt>⚙️ With</dt><dd><div class="code-block">${escapeHtml(JSON.stringify(step.with, null, 2))}</div></dd>`;
             } else {
                 const script = step.script || step.pwsh || step.bash || step.powershell || (step.inputs && step.inputs.script);
                 if (script) html += `<dt>💻 Script</dt><dd><div class="code-block">${escapeHtml(script)}</div></dd>`;
@@ -395,6 +397,127 @@
             }
         }
 
+        function describeRunsOn(runsOn) {
+            if (isPlainObject(runsOn)) {
+                const parts = [];
+                if (runsOn.group) { parts.push(`group ${runsOn.group}`); }
+                if (runsOn.labels) { parts.push(asList(runsOn.labels).join(', ')); }
+                return parts.join(' · ') || JSON.stringify(runsOn);
+            }
+            return asList(runsOn).join(', ');
+        }
+
+        function describeConcurrency(concurrency) {
+            if (!isPlainObject(concurrency)) { return String(concurrency); }
+            return `${concurrency.group}${concurrency['cancel-in-progress'] ? ' (cancels in-progress runs)' : ''}`;
+        }
+
+        function describePermissions(permissions) {
+            if (!isPlainObject(permissions)) { return String(permissions); }
+            const entries = Object.entries(permissions);
+            return entries.length ? entries.map(([scope, level]) => `${scope}: ${level}`).join(', ') : 'none';
+        }
+
+        function renderGitHubInputs(inputs) {
+            if (!isPlainObject(inputs)) { return ''; }
+            return '<ul class="rules">' + Object.entries(inputs).map(([name, def]) => {
+                const d = isPlainObject(def) ? def : {};
+                const parts = [];
+                if (d.type) { parts.push(escapeHtml(String(d.type))); }
+                if (d.required) { parts.push('required'); }
+                if (d.default !== undefined) { parts.push(`default <code>${escapeHtml(String(d.default))}</code>`); }
+                if (Array.isArray(d.options)) { parts.push(`options ${d.options.map(o => escapeHtml(String(o))).join(', ')}`); }
+                return `<li><code>${escapeHtml(name)}</code>${parts.length ? ` — ${parts.join(', ')}` : ''}${d.description ? `<br><span style="opacity: 0.8;">${escapeHtml(String(d.description))}</span>` : ''}</li>`;
+            }).join('') + '</ul>';
+        }
+
+        // Details for triggers that carry configuration: schedules, branch/path filters, inputs
+        function renderGitHubTriggers(on) {
+            if (!isPlainObject(on)) { return ''; }
+            let html = '';
+            Object.entries(on).forEach(([event, config]) => {
+                if (event === 'schedule') {
+                    asList(config).forEach(entry => {
+                        const e = entry || {};
+                        html += `<p><strong>⏰ schedule:</strong> <code>${escapeHtml(String(e.cron))}</code>${e.timezone ? ` (${escapeHtml(String(e.timezone))})` : ' (UTC)'}</p>`;
+                    });
+                    return;
+                }
+                if (!isPlainObject(config)) { return; }
+                const filters = [];
+                ['branches', 'branches-ignore', 'tags', 'tags-ignore', 'paths', 'paths-ignore', 'types', 'workflows'].forEach(k => {
+                    if (config[k]) { filters.push(`${k}: ${asList(config[k]).join(', ')}`); }
+                });
+                if (filters.length) {
+                    html += `<p><strong>${escapeHtml(event)}:</strong> ${escapeHtml(filters.join(' · '))}</p>`;
+                }
+                if (config.inputs) {
+                    html += `<p><strong>${escapeHtml(event)} inputs:</strong></p>${renderGitHubInputs(config.inputs)}`;
+                }
+                if (isPlainObject(config.secrets)) {
+                    html += `<p><strong>${escapeHtml(event)} secrets:</strong> ${Object.keys(config.secrets).map(s => `<code>${escapeHtml(s)}</code>`).join(', ')}</p>`;
+                }
+                if (isPlainObject(config.outputs)) {
+                    html += `<p><strong>${escapeHtml(event)} outputs:</strong> ${Object.keys(config.outputs).map(o => `<code>${escapeHtml(o)}</code>`).join(', ')}</p>`;
+                }
+            });
+            return html ? `<div class="stage"><h2>🔔 Triggers</h2><div class="job">${html}</div></div>` : '';
+        }
+
+        function describeGitHubService(name, service) {
+            if (!isPlainObject(service)) { return `<code>${escapeHtml(name)}</code>`; }
+            const parts = [];
+            if (service.image) { parts.push(`<code>${escapeHtml(String(service.image))}</code>`); }
+            if (service.ports) { parts.push(`ports ${escapeHtml(asList(service.ports).join(', '))}`); }
+            if (service.entrypoint) { parts.push(`entrypoint <code>${escapeHtml(String(service.entrypoint))}</code>`); }
+            if (service.command) { parts.push(`command <code>${escapeHtml(asList(service.command).join(' '))}</code>`); }
+            return `<code>${escapeHtml(name)}</code>${parts.length ? ` (${parts.join(', ')})` : ''}`;
+        }
+
+        function renderGitHubJobSettings(job) {
+            let html = '';
+            if (job.if !== undefined) { html += `<p><strong>🔀 Condition:</strong> <code>${escapeHtml(String(job.if))}</code></p>`; }
+            if (job.strategy) {
+                const strategy = job.strategy;
+                const matrix = strategy.matrix;
+                if (isPlainObject(matrix)) {
+                    const dims = Object.entries(matrix).filter(([k]) => k !== 'include' && k !== 'exclude');
+                    const combos = dims.length ? dims.reduce((total, [, v]) => total * (Array.isArray(v) ? v.length : 1), 1) : 0;
+                    const excluded = asList(matrix.exclude).length;
+                    const included = asList(matrix.include).length;
+                    html += `<p><strong>🔢 Matrix:</strong> ${escapeHtml(dims.map(([k, v]) => `${k}: ${Array.isArray(v) ? v.map(x => typeof x === 'object' ? JSON.stringify(x) : x).join(' | ') : v}`).join(' × ') || 'dynamic')}</p>`;
+                    const summary = [];
+                    if (dims.length && dims.every(([, v]) => Array.isArray(v))) { summary.push(`${Math.max(combos - excluded, 0)} combination(s)`); }
+                    if (included) { summary.push(`+${included} include`); }
+                    if (excluded) { summary.push(`${excluded} exclude`); }
+                    if (summary.length) { html += `<p style="opacity: 0.8;">${escapeHtml(summary.join(', '))}</p>`; }
+                } else if (matrix !== undefined) {
+                    html += `<p><strong>🔢 Matrix:</strong> <code>${escapeHtml(String(matrix))}</code></p>`;
+                }
+                const options = [];
+                if (strategy['fail-fast'] !== undefined) { options.push(`fail-fast: ${strategy['fail-fast']}`); }
+                if (strategy['max-parallel'] !== undefined) { options.push(`max-parallel: ${strategy['max-parallel']}`); }
+                if (options.length) { html += `<p>${escapeHtml(options.join(' · '))}</p>`; }
+            }
+            if (job.container) {
+                const image = isPlainObject(job.container) ? job.container.image : job.container;
+                html += `<p><strong>🐳 Container:</strong> <code>${escapeHtml(String(image))}</code></p>`;
+            }
+            if (isPlainObject(job.services)) {
+                html += `<p><strong>🛠️ Services:</strong> ${Object.entries(job.services).map(([name, svc]) => describeGitHubService(name, svc)).join(', ')}</p>`;
+            }
+            if (job.concurrency) { html += `<p><strong>🚦 Concurrency:</strong> ${escapeHtml(describeConcurrency(job.concurrency))}</p>`; }
+            if (job.permissions) { html += `<p><strong>🔐 Permissions:</strong> ${escapeHtml(describePermissions(job.permissions))}</p>`; }
+            if (job['timeout-minutes'] !== undefined) { html += `<p><strong>⏱️ Timeout:</strong> ${escapeHtml(String(job['timeout-minutes']))} min</p>`; }
+            if (job['continue-on-error'] !== undefined && job['continue-on-error'] !== false) {
+                html += `<p class="approval-info">ℹ️ Continue on error: ${escapeHtml(String(job['continue-on-error']))}</p>`;
+            }
+            if (isPlainObject(job.outputs)) {
+                html += `<p><strong>📤 Outputs:</strong> ${Object.keys(job.outputs).map(o => `<code>${escapeHtml(o)}</code>`).join(', ')}</p>`;
+            }
+            return html;
+        }
+
         function renderGitHub(data) {
             try {
                 if (!data) {
@@ -409,7 +532,10 @@
                 html += `<div class="info-card"><h3>🔔 Triggers</h3><p>${triggers.join(', ')}</p></div>`;
             }
             if (data.jobs) html += `<div class="info-card"><h3>💼 Jobs</h3><p>${Object.keys(data.jobs).length}</p></div>`;
+            if (data.concurrency) html += `<div class="info-card"><h3>🚦 Concurrency</h3><p>${escapeHtml(describeConcurrency(data.concurrency))}</p></div>`;
+            if (data.permissions) html += `<div class="info-card"><h3>🔐 Permissions</h3><p>${escapeHtml(describePermissions(data.permissions))}</p></div>`;
             html += '</div>';
+            html += renderGitHubTriggers(data.on);
 
             const jobColors = themePalette;
             const jobKeys = data.jobs ? Object.keys(data.jobs) : [];
@@ -432,19 +558,44 @@
             if (data.jobs) {
                 Object.entries(data.jobs).forEach(([key, job], idx) => {
                     const color = jobColors[idx % jobColors.length];
-                    html += `<div id="J${idx}" class="job-container" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="color: ${color};">💼 ${job.name || key}</h2>`;
+                    html += `<div id="J${idx}" class="job-container" style="border-color: ${color}; background: linear-gradient(135deg, ${color}33 0%, ${color}14 100%);"><h2 style="color: ${color};">💼 ${escapeHtml(String(job.name || key))}</h2>`;
                     html += '<div class="job">';
-                    if (job['runs-on']) html += `<p><strong>🖥️ Runs on:</strong> ${job['runs-on']}</p>`;
+                    if (job['runs-on']) html += `<p><strong>🖥️ Runs on:</strong> ${escapeHtml(describeRunsOn(job['runs-on']))}</p>`;
+
+                    if (job.uses) {
+                        html += '<div class="approval-badge">♻️ Reusable Workflow</div>';
+                        html += `<p><strong>Calls:</strong> <code>${escapeHtml(String(job.uses))}</code></p>`;
+                        if (isPlainObject(job.with)) {
+                            html += `<p><strong>With:</strong> ${Object.entries(job.with).map(([k, v]) => `<code>${escapeHtml(k)}</code> = ${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}`).join(', ')}</p>`;
+                        }
+                        if (job.secrets === 'inherit') {
+                            html += '<p><strong>Secrets:</strong> inherited</p>';
+                        } else if (isPlainObject(job.secrets)) {
+                            html += `<p><strong>Secrets:</strong> ${Object.keys(job.secrets).map(s => `<code>${escapeHtml(s)}</code>`).join(', ')}</p>`;
+                        }
+                    }
 
                     if (job.environment) {
                         const envName = typeof job.environment === 'string' ? job.environment : job.environment.name;
-                        html += `<div class="approval-badge">🔒 Protected Environment</div>`;
-                        html += `<p><strong>📦 Environment:</strong> ${envName}</p>`;
-                        if (typeof job.environment === 'object' && job.environment.url) {
-                            html += `<p><strong>🔗 URL:</strong> <code>${job.environment.url}</code></p>`;
+                        // `deployment: false` uses the environment's secrets and variables without a deployment
+                        const createsDeployment = !(isPlainObject(job.environment) && job.environment.deployment === false);
+                        if (createsDeployment) {
+                            html += `<div class="approval-badge">🔒 Protected Environment</div>`;
+                        } else {
+                            html += `<div class="approval-badge" style="background: linear-gradient(135deg, #888 0%, #666 100%);">🔑 Environment (no deployment)</div>`;
                         }
-                        html += `<p class="approval-info">⚠️ This environment may require approval before deployment</p>`;
+                        html += `<p><strong>📦 Environment:</strong> ${escapeHtml(String(envName))}</p>`;
+                        if (typeof job.environment === 'object' && job.environment.url) {
+                            html += `<p><strong>🔗 URL:</strong> <code>${escapeHtml(String(job.environment.url))}</code></p>`;
+                        }
+                        if (createsDeployment) {
+                            html += `<p class="approval-info">⚠️ This environment may require approval before deployment</p>`;
+                        } else {
+                            html += `<p class="approval-info">ℹ️ Uses the environment's secrets and variables without creating a deployment</p>`;
+                        }
                     }
+
+                    html += renderGitHubJobSettings(job);
 
                     if (job.steps) {
                         html += '<h3>Steps</h3><ul class="steps">';
@@ -452,7 +603,8 @@
                             const sid = `step_${stepCounter++}`;
                             allSteps[sid] = step;
                             const name = step.name || step.uses || step.run?.substring(0, 50) || 'Step';
-                            html += `<li data-step="${sid}" style="cursor:pointer;">📝 ${name}</li>`;
+                            const condition = step.if !== undefined ? ` <span style="opacity: 0.7; font-size: 11px;">if ${escapeHtml(String(step.if))}</span>` : '';
+                            html += `<li data-step="${sid}" style="cursor:pointer;">📝 ${escapeHtml(String(name))}${condition}</li>`;
                         });
                         html += '</ul>';
                     }

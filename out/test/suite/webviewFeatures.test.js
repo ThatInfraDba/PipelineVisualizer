@@ -215,6 +215,48 @@ suite('AWS CodePipeline (CloudFormation) features', () => {
         ]);
     });
 });
+suite('GitHub Actions features', () => {
+    const sample = (0, webviewHarness_1.readSample)('github-advanced.yaml');
+    test('shows trigger details, concurrency and permissions', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('github', sample);
+        (0, webviewHarness_1.assertRendered)(html);
+        assertIncludesAll(html, [
+            '<code>0 6 * * 1-5</code> (Europe/Amsterdam)',
+            'push:</strong> branches: main · paths-ignore: docs/**',
+            'pull_request:</strong> types: opened, synchronize',
+            'workflow_dispatch inputs',
+            '<code>environment</code> — choice, default <code>staging</code>, options staging, production',
+            '<code>dry_run</code> — boolean, required',
+            'release-${{ github.ref }} (cancels in-progress runs)',
+            'contents: read, id-token: write'
+        ]);
+    });
+    test('shows matrix, services, reusable workflows and job settings', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('github', sample);
+        assertIncludesAll(html, [
+            'os: ubuntu-latest | windows-latest × node: 20 | 22 | 24',
+            '5 combination(s), +1 include, 1 exclude',
+            'fail-fast: false · max-parallel: 4',
+            'entrypoint <code>/usr/local/bin/docker-entrypoint.sh</code>',
+            'command <code>postgres -c fsync=off</code>',
+            '♻️ Reusable Workflow',
+            '<code>example/workflows/.github/workflows/security-scan.yml@v2</code>',
+            '<code>severity</code> = high',
+            'Secrets:</strong> inherited',
+            '<code>node:24</code>',
+            '⏱️ Timeout:</strong> 20 min',
+            'group production-runners · self-hosted, linux',
+            '<code>github.ref == \'refs/heads/main\'</code>',
+            '<code>version</code>',
+            'if ${{ case(matrix.os == \'ubuntu-latest\', true, false) }}'
+        ]);
+    });
+    test('environment with deployment: false is not shown as a deployment', () => {
+        const html = (0, webviewHarness_1.renderInWebview)('github', sample);
+        assertIncludesAll(html, ['🔑 Environment (no deployment)', 'without creating a deployment', '🔒 Protected Environment']);
+        assert.strictEqual((html.match(/🔒 Protected Environment/g) || []).length, 1, 'Only the production job creates a deployment');
+    });
+});
 suite('Bitbucket Pipelines features', () => {
     const sample = (0, webviewHarness_1.readSample)('bitbucket-advanced.yml');
     test('shows triggers, agents, clone, options and services', () => {

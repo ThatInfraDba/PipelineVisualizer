@@ -51,6 +51,7 @@ const SAMPLES = [
     { file: 'azure-jobs-only.yaml', expectedBadge: 'Azure DevOps' },
     { file: 'azure-steps-only.yaml', expectedBadge: 'Azure DevOps' },
     { file: 'github-workflow.yaml', expectedBadge: 'GitHub Actions' },
+    { file: 'github-advanced.yaml', expectedBadge: 'GitHub Actions' },
     { file: 'gitlab-pipeline.yaml', expectedBadge: 'GitLab CI' },
     { file: 'gitlab-component.yml', expectedBadge: 'GitLab CI' },
     { file: 'advanced.gitlab-ci.yml', expectedBadge: 'GitLab CI' },
