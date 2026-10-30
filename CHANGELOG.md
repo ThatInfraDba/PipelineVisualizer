@@ -2,7 +2,7 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
-## [1.6.0] - Unreleased
+## [1.6.0] - 2026-10-30
 
 Mermaid 12 upgrade ([#39](https://github.com/ThatInfraDba/PipelineVisualizer/issues/39)).
 
