@@ -137,15 +137,15 @@ suite('Dependency graph diagrams', () => {
 		assertNoEdge(diagram, 'BB1_0', 'BB1_1');
 	});
 
-	test('Node labels from the YAML are HTML-escaped and no click callbacks are emitted', () => {
+	test('Node labels from the YAML use Mermaid entity codes and no click callbacks are emitted', () => {
 		const diagram = diagramOf(renderInWebview('azure', [
 			'stages:',
 			'  - stage: Build',
 			'    displayName: \'<img src=x onerror=alert(1)> "quoted"\'',
 			'    jobs: []'
 		].join('\n')));
-		assert.ok(!diagram.includes('<img'), `Expected escaped label in:\n${diagram}`);
-		assert.ok(diagram.includes('&lt;img src=x onerror=alert(1)&gt; \'quoted\''), `Expected escaped label in:\n${diagram}`);
+		assert.ok(!diagram.includes('<img') && !diagram.includes('&lt;img'), `Expected escaped label in:\n${diagram}`);
+		assert.ok(diagram.includes('S0["#lt;img src=x onerror=alert(1)#gt; #quot;quoted#quot;"]'), `Expected escaped label in:\n${diagram}`);
 		assert.ok(!/^click /m.test(diagram), `Unexpected click callback in:\n${diagram}`);
 	});
 });
