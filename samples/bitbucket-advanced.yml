@@ -1,0 +1,102 @@
+image: atlassian/default-image:5
+
+clone:
+  depth: 50
+  lfs: true
+
+options:
+  max-time: 30
+  size: 2x
+
+definitions:
+  caches:
+    npm: ~/.npm
+  services:
+    postgres:
+      image: postgres:16
+  agents:
+    readme-docs-updater:
+      prompt: |
+        You are an AI assistant helping maintain documentation for this repository.
+        Update README.md when public APIs change.
+
+triggers:
+  pipeline-completed:
+    - condition: BITBUCKET_TRIGGER_PIPELINE_STATUS == "FAILED"
+      pipelines:
+        - notify-failure
+  pullrequest-push:
+    - condition: BITBUCKET_PR_DESTINATION_BRANCH == "main"
+      pipelines:
+        - update-readme-docs
+
+pipelines:
+  default:
+    - step:
+        name: Build
+        caches: [npm]
+        runtime:
+          cloud:
+            arch: arm
+        script:
+          - npm ci
+          - npm run build
+    - parallel:
+        fail-fast: true
+        steps:
+          - step:
+              name: Unit tests
+              services: [postgres]
+              script:
+                - npm test
+          - step:
+              name: Lint
+              condition:
+                changesets:
+                  includePaths:
+                    - "src/**"
+              script:
+                - npm run lint
+    - stage:
+        name: Deploy to staging
+        deployment: staging
+        trigger: manual
+        condition:
+          changesets:
+            includePaths:
+              - "infra/**"
+        steps:
+          - step:
+              name: Terraform apply
+              oidc: true
+              max-time: 20
+              runs-on:
+                - self.hosted
+                - linux
+              script:
+                - terraform apply -auto-approve
+  custom:
+    update-readme-docs:
+      - step:
+          name: Update README and docs
+          auth:
+            system:
+              scopes:
+                - write:repository:bitbucket
+                - write:pullrequest:bitbucket
+          script:
+            - agent: readme-docs-updater
+    notify-failure:
+      - variables:
+          - name: CHANNEL
+            default: "#builds"
+            allowed-values: ["#builds", "#alerts"]
+      - step:
+          name: Notify
+          script:
+            - pipe: atlassian/slack-notify:2.0.0
+              variables:
+                WEBHOOK_URL: $SLACK_WEBHOOK
+                MESSAGE: Pipeline failed
+    shared-release:
+      import: shared-pipelines:main:release

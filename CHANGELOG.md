@@ -2,6 +2,82 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.5.1] - 2026-10-30
+
+### Security
+- **Mermaid bundled instead of loaded from a CDN** — `src/visualizerPanel.ts` loaded `https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js` (floating major version, no integrity hash), and the CSP allowed scripts from all of `cdn.jsdelivr.net`. Mermaid is now a pinned dev dependency (`10.9.8`), copied to `media/vendor/mermaid.min.js` by the new `vendor` script (run by `compile` and `watch`) and loaded through `asWebviewUri` with the nonce. The CSP is now `script-src 'nonce-…'` only, and the unused `font-src` was removed. Diagrams no longer need internet access
+- **HTML injection through diagram labels** — node labels (stage / job / step names from the YAML) were inserted into the Mermaid block unescaped, then assigned to `innerHTML`, so a name such as `<img …>` became markup in the panel. `buildFlowchart` now HTML-escapes labels
+- **Mermaid `securityLevel: 'strict'`** (was `'loose'`) — Mermaid sanitizes label HTML and ignores `click` callbacks. Diagram node clicks now go through the existing delegated click listener (`flowchartTargets` map) instead of `window.pvScrollTo_*` globals, so click-to-scroll keeps working
+- **Dev dependency** — `serialize-javascript` (through `mocha`) updated to 7.1.3+ (GHSA-m5mm-p8h7-m29v); not shipped in the extension
+
+### Changed
+- "Scripts Failed to Load" error and README Known Issues no longer refer to `cdn.jsdelivr.net`
+
+## [1.5.0] - 2026-10-19
+
+Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualizer/issues/34)).
+
+### Added
+- **Dependency-graph diagrams** — diagrams now follow the real dependencies instead of always drawing a straight chain. Independent nodes start from `Start` in parallel and nodes nothing depends on lead to `End`. A shared `buildFlowchart` helper in `media/webview.js` replaces the per-platform diagram code, and the automatic layout direction now uses the longest dependency path instead of the node count
+  - **GitHub Actions** — edges from `jobs.<id>.needs`; jobs without `needs` run in parallel, as they do on GitHub
+  - **Azure DevOps** — edges from stage `dependsOn`; a stage without `dependsOn` depends on the previous stage and `dependsOn: []` starts immediately
+  - **GitLab CI/CD** — when any job uses `needs`, the diagram switches to a job-level graph: `needs` edges, `needs: []` starts immediately, and jobs without `needs` wait for every job in the previous stage. Pipelines without `needs` keep the stage chain
+  - **Bitbucket Pipelines** — `parallel` groups fan out into one node per step and join again before the next step (pending since v1.2.0)
+- **Bitbucket Pipelines**
+  - **Triggers** (top-level `triggers:`) — each event type with its `condition` and the custom pipelines it starts; clicking a pipeline switches the selector to it
+  - **Agentic steps** — `definitions.agents` info card, the agent prompt in the `- agent:` step popup, and step `auth.system.scopes`
+  - **Imported pipelines** (`import:`) — shown as a reference card with the source instead of "0 steps"
+  - **Custom pipeline variables** (`- variables:` with `default` / `allowed-values`) in a Run-time Variables section
+  - **Clone and options** — top-level and step `clone` (`depth`, `lfs`, `enabled`, `skip-ssl-verify`), global `options` (`max-time`, `size`, `docker`, `runtime`), and `definitions.services`
+  - **Step and stage settings** — step `condition` (`changesets`), `runs-on`, `runtime.cloud.arch`, `max-time`, `oidc`; stage `deployment`, `trigger: manual`, `condition`; `parallel` `fail-fast`
+  - Pipeline summary cards are clickable and switch the selector
+  - New sample `samples/bitbucket-advanced.yml`
+- **GitLab CI/CD**
+  - **`extends:` resolution** — jobs inherit from hidden (`.template`) and regular jobs, including chains and multiple parents; hashes merge deeply and other values are replaced, matching GitLab. Inherited `stage`, `image`, `script`, `rules` etc. now show
+  - **`!reference [job, key]`** — resolved in `script`, `before_script`, `after_script` and `rules` (previously shown as `.job,script` after the tag was stripped)
+  - **Downstream pipelines** (`trigger:`) — child pipeline `include`, multi-project `project` / `branch`, `strategy: depend` and `forward`, instead of an empty job
+  - **`parallel` / `parallel:matrix`** — job count and the matrix variables
+  - **`include:`** — info card plus a Configuration section listing local / project / remote / template / `component:` sources
+  - **Rules in detail** — job `rules` and `workflow:rules` list each rule's `if` / `changes` / `exists` and its outcome (`when`, `allow_failure`, `variables`) instead of a count; Workflow card shows the rule count and `auto_cancel`
+  - **Job settings** — `services`, `cache`, `artifacts` (paths, reports, expiry), `retry`, `timeout`, `resource_group`, `release`, `coverage`, `environment:action`, `id_tokens`, `secrets`, and job-level `inputs` (GitLab 18.10)
+  - **`spec:inputs`** — `regex` and conditional `rules` (GitLab 18.7) with their `options` / `default`; array defaults (GitLab 19.0) shown as JSON
+  - Job names and script lines are now HTML-escaped
+  - New sample `samples/advanced.gitlab-ci.yml`
+- **AWS CodeBuild**
+  - **Batch builds** (`batch:`) — `build-graph` renders as its own dependency graph from `depend-on`, `build-list` as parallel builds, `build-matrix` with its dimensions and build count, `build-fanout` with its parallelism; plus `fast-fail`, `combine-artifacts`, `timeout-in-mins`, `service-role`. Batch-only buildspecs are now detected as CodeBuild
+  - **Phase `on-failure`** (`ABORT`, `CONTINUE`, `RETRY`, `RETRY-<count>`, `RETRY-<regex>`) and phase `run-as`
+  - **Build settings** — top-level `run-as`, `env.shell`, `env.git-credential-helper`, variable / Parameter Store / Secrets Manager / exported variable names, `proxy`, and `cache` `key` / `fallback-keys` / `action` / `paths`
+  - **Reports** — each report group with its `file-format`, `files`, `base-directory`
+  - Runtime versions accept lists and are HTML-escaped
+  - New sample `samples/codebuild-batch.yml`
+- **AWS CodePipeline (CloudFormation)**
+  - **Parallel actions** — actions are grouped by `RunOrder` (default 1); actions sharing a run order are marked as running in parallel
+  - **V2 pipelines** — Pipeline Settings section with `PipelineType`, `ExecutionMode` (QUEUED / PARALLEL / SUPERSEDED), Git `Triggers` (push / pull request filters on branches, file paths, tags) and pipeline `Variables`
+  - **Stage conditions** — `BeforeEntry`, `OnSuccess` and `OnFailure` with their rules and results, including rollback and retry mode
+  - **Commands actions** (Compute / `Commands`) list their commands and `OutputVariables`; commands are also in the action popup
+  - **Manual approval actions** (`Category: Approval`) render as approval gates with `CustomData`, `NotificationArn` and `ExternalEntityLink`
+  - Long-form intrinsic functions (`Ref`, `Fn::*`) display as `Ref(X)` / `Fn::GetAtt(...)` instead of `[object Object]`
+  - New sample `samples/codepipeline-v2.yaml`
+- **GitHub Actions**
+  - **Reusable workflow jobs** (`jobs.<id>.uses`) show the called workflow, `with` values and `secrets` (including `inherit`) instead of an empty job
+  - **`strategy`** — matrix dimensions, combination count after `exclude` / `include`, `fail-fast`, `max-parallel`
+  - **Trigger details** — `schedule` crons with their `timezone` (new in 2026; UTC otherwise), branch / tag / path / type filters, `workflow_dispatch` and `workflow_call` inputs (type, required, default, options), `workflow_call` secrets and outputs
+  - **Environments with `deployment: false`** (new in 2026) are shown as using the environment's secrets and variables, not as a protected deployment
+  - **Service containers** — image, ports, and the `entrypoint` / `command` overrides (new in 2026)
+  - **Job settings** — `if` (including `case()` expressions, shown verbatim), `container`, `concurrency`, `permissions`, `timeout-minutes`, `continue-on-error`, `outputs`; workflow-level `concurrency` and `permissions` cards; `runs-on` groups / label lists
+  - Steps show their `if` condition; the step popup adds the condition and `with` inputs
+  - New sample `samples/github-advanced.yaml`
+- **Azure DevOps**
+  - **Deployment job strategies** — steps in `runOnce`, `rolling` and `canary` lifecycle hooks (`preDeploy`, `deploy`, `routeTraffic`, `postRouteTraffic`, `on.success`, `on.failure`) are now shown, with `maxParallel` / canary `increments`. Previously deployment jobs showed no steps
+  - **Templates** — stage, job and step `template:` references (with their `parameters`) and top-level `extends:` render as reference cards; template contents in other files are not fetched
+  - **Pipeline configuration** — `parameters` (type, default, allowed values), `resources` (repositories, pipelines, containers, …) and a `variables` count
+  - **Stage settings** — `trigger: manual`, `dependsOn`, `condition`, `isSkippable: false`, `lockBehavior`, stage `pool`
+  - **Job settings** — `dependsOn`, `condition`, job `pool`, `container`, `services`, `strategy.matrix` / `parallel` / `maxParallel`, `timeoutInMinutes`, `continueOnError`
+  - Steps show `checkout` / `download` / `publish` shortcuts, `bash` / `pwsh` / `powershell` scripts and their `condition`; stage, job and step names are HTML-escaped
+  - New sample `samples/azure-advanced.yaml`
+- **README** — removed the "new in v1.2.0 / still undergoing testing" notes for GitLab CI/CD, AWS CodeBuild and Bitbucket Pipelines (top banner, Supported Formats headings, Known Issues, 1.2.0 release notes); all platforms now have sample-based integration and rendering test coverage
+- **Webview test harness** moved to `src/test/suite/webviewHarness.ts` so rendering tests can share it; new `webviewDiagram.test.ts` asserts on the generated Mermaid edges
+
 ## [1.4.1] - 2026-10-19
 
 Fixes found while auditing all supported platforms against their current YAML syntax.

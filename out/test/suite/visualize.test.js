@@ -50,13 +50,19 @@ const SAMPLES = [
     { file: 'azure-pipeline.yaml', expectedBadge: 'Azure DevOps' },
     { file: 'azure-jobs-only.yaml', expectedBadge: 'Azure DevOps' },
     { file: 'azure-steps-only.yaml', expectedBadge: 'Azure DevOps' },
+    { file: 'azure-advanced.yaml', expectedBadge: 'Azure DevOps' },
     { file: 'github-workflow.yaml', expectedBadge: 'GitHub Actions' },
+    { file: 'github-advanced.yaml', expectedBadge: 'GitHub Actions' },
     { file: 'gitlab-pipeline.yaml', expectedBadge: 'GitLab CI' },
     { file: 'gitlab-component.yml', expectedBadge: 'GitLab CI' },
+    { file: 'advanced.gitlab-ci.yml', expectedBadge: 'GitLab CI' },
     { file: 'awsbuildspec-sample.yml', expectedBadge: 'AWS CodeBuild' },
+    { file: 'codebuild-batch.yml', expectedBadge: 'AWS CodeBuild' },
     { file: 'awscodebuild-pipeline.yaml', expectedBadge: 'AWS CloudFormation' },
+    { file: 'codepipeline-v2.yaml', expectedBadge: 'AWS CloudFormation' },
     { file: 'bitbucket-pipeline.yaml', expectedBadge: 'Bitbucket Pipelines' },
-    { file: 'bitbucket-pipelines.yml', expectedBadge: 'Bitbucket Pipelines' }
+    { file: 'bitbucket-pipelines.yml', expectedBadge: 'Bitbucket Pipelines' },
+    { file: 'bitbucket-advanced.yml', expectedBadge: 'Bitbucket Pipelines' }
 ];
 suite('Pipeline Visualizer — sample pipelines', () => {
     setup(() => {

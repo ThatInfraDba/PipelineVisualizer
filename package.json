@@ -2,7 +2,7 @@
   "name": "pipeline-visualizer",
   "displayName": "Pipeline Visualizer",
   "description": "Visualize Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines YAML files with interactive diagrams",
-  "version": "1.4.1",
+  "version": "1.5.1",
   "publisher": "DannydeHaan",
   "icon": "icon.png",
   "repository": {
@@ -107,8 +107,9 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
+    "compile": "npm run vendor && tsc -p ./",
+    "vendor": "node -e \"const fs=require('fs');fs.mkdirSync('media/vendor',{recursive:true});fs.copyFileSync('node_modules/mermaid/dist/mermaid.min.js','media/vendor/mermaid.min.js')\"",
+    "watch": "npm run vendor && tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "node ./out/test/runTest.js"
@@ -122,6 +123,7 @@
     "@typescript-eslint/parser": "^8.71.2",
     "@vscode/test-electron": "^3.1.0",
     "eslint": "^10.13.0",
+    "mermaid": "10.9.8",
     "mocha": "^12.0.3",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.71.2"

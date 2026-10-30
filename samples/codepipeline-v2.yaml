@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CodePipeline V2 with triggers, variables, stage conditions and a Commands action
+
+Parameters:
+  ConnectionArn:
+    Type: String
+  ArtifactBucket:
+    Type: String
+
+Resources:
+  ReleasePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: storefront-release
+      PipelineType: V2
+      ExecutionMode: QUEUED
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Variables:
+        - Name: DeployRegion
+          DefaultValue: eu-west-1
+      Triggers:
+        - ProviderType: CodeStarSourceConnection
+          GitConfiguration:
+            SourceActionName: Source
+            Push:
+              - Branches:
+                  Includes: [main]
+                FilePaths:
+                  Excludes: ['docs/**']
+            PullRequest:
+              - Events: [OPEN, UPDATED]
+                Branches:
+                  Includes: [main]
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: '1'
+              Configuration:
+                ConnectionArn: !Ref ConnectionArn
+                FullRepositoryId: example/storefront
+                BranchName: main
+              OutputArtifacts:
+                - Name: SourceOutput
+        - Name: Test
+          Actions:
+            - Name: UnitTests
+              RunOrder: 1
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: storefront-unit
+              InputArtifacts:
+                - Name: SourceOutput
+            - Name: Lint
+              RunOrder: 1
+              ActionTypeId:
+                Category: Compute
+                Owner: AWS
+                Provider: Commands
+                Version: '1'
+              Commands:
+                - npm ci
+                - npm run lint
+              OutputVariables:
+                - LINT_RESULT
+              InputArtifacts:
+                - Name: SourceOutput
+            - Name: Package
+              RunOrder: 2
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: storefront-package
+              InputArtifacts:
+                - Name: SourceOutput
+          OnFailure:
+            Result: RETRY
+            RetryConfiguration:
+              RetryMode: FAILED_ACTIONS
+        - Name: Approve
+          Actions:
+            - Name: ProductionApproval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: '1'
+              Configuration:
+                CustomData: Check the staging dashboard before approving
+                NotificationArn: !Ref ApprovalTopic
+        - Name: Deploy
+          BeforeEntry:
+            Conditions:
+              - Result: FAIL
+                Rules:
+                  - Name: NoActiveAlarms
+                    RuleTypeId:
+                      Category: Rule
+                      Owner: AWS
+                      Provider: CloudWatchAlarm
+                      Version: '1'
+                    Configuration:
+                      AlarmName: storefront-errors
+          OnFailure:
+            Result: ROLLBACK
+          OnSuccess:
+            Conditions:
+              - Result: ROLLBACK
+                Rules:
+                  - Name: PostDeployCheck
+                    RuleTypeId:
+                      Category: Rule
+                      Owner: AWS
+                      Provider: CloudWatchAlarm
+                      Version: '1'
+          Actions:
+            - Name: DeployStack
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: '1'
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub 'storefront-${AWS::Region}'
+              InputArtifacts:
+                - Name: SourceOutput
+
+  ApprovalTopic:
+    Type: AWS::SNS::Topic

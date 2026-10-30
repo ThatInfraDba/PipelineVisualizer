@@ -4,12 +4,11 @@ Visualize your CI/CD pipeline YAML files directly in VS Code with beautiful, int
 
 🔗 **[GitHub Repository](https://github.com/ThatInfraDba/PipelineVisualizer)** | 📦 **[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=DannydeHaan.pipeline-visualizer)** | 💖 **[Sponsor this Project](https://github.com/sponsors/ThatInfraDba)**
 
-> **Note:** GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new in v1.2.0 and still undergoing testing. Please report any issues on GitHub.
-
 ## Features
 
 - **🤖 Auto-Detection** - Automatically identifies Azure DevOps, GitHub Actions, GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines
 - **📊 Interactive Diagrams** - Visual flowcharts powered by Mermaid.js showing your pipeline structure
+- **🕸️ Dependency Graphs** - Diagrams follow real dependencies (`needs`, `dependsOn`, `depend-on`, parallel groups), so parallel work shows as parallel branches
 - **🎨 Color-Coded Stages** - Each stage gets a unique color for easy differentiation
 - **🖱️ Clickable Nodes** - Click any stage in the diagram to jump to its details
 - **🔍 Step Details** - Click any step to view detailed configuration, scripts, and parameters
@@ -72,44 +71,57 @@ The extension will:
 ## Supported Formats
 
 ### Azure DevOps Pipelines
-- Stages, jobs, and steps
-- Stage-less pipelines (top-level `jobs:` or `steps:` only)
-- Manual approval gates
-- Dependencies and conditions
-- Pool configurations
-- Triggers and PR builds
-- Variables and parameters
+- Stages, jobs, and steps; stage-less pipelines (top-level `jobs:` or `steps:` only)
+- Stage dependency graph from `dependsOn`
+- Deployment jobs with `runOnce`, `rolling` and `canary` strategies and their lifecycle hooks
+- Manual approval gates and manual stages (`trigger: manual`)
+- Stage and job conditions, `isSkippable`, `lockBehavior`
+- Job matrix / parallel strategies, containers, and services
+- Stage, job, and step `template:` references and `extends:`
+- Parameters, variables, resources, pools, and triggers
 
 ### GitHub Actions Workflows
-- Workflows with multiple jobs
-- Job dependencies (`needs:`)
-- Actions (`uses:`) and scripts (`run:`)
-- Triggers (`on:`)
-- Runners (`runs-on:`)
-- Step conditions and parameters
+- Job dependency graph from `needs:` (independent jobs run in parallel)
+- Actions (`uses:`), scripts (`run:`), and step conditions
+- Reusable workflow jobs (`jobs.<id>.uses`) with `with` and `secrets`
+- Matrix strategies with `include` / `exclude`, `fail-fast`, `max-parallel`
+- Triggers with filters, schedules (including `timezone`), and `workflow_dispatch` / `workflow_call` inputs
+- Environments (including `deployment: false`), service containers, containers
+- Concurrency, permissions, timeouts, and outputs
 
-### GitLab CI/CD Pipelines _(new in v1.2.0 — additional testing in progress)_
+### GitLab CI/CD Pipelines
 - Jobs and stages, including `.pre` and `.post`
-- CI/CD components and `spec:inputs` headers
-- Job dependencies (`needs:`, `dependencies:`)
-- Artifacts and caches
-- Rules and conditions
-- Services and environment configuration
+- Job-level dependency graph when `needs:` is used
+- `extends:` and `!reference` resolution
+- Downstream pipelines (`trigger:`), `parallel` / `parallel:matrix`
+- CI/CD components, `spec:inputs` (including conditional rules), and job `inputs`
+- `include:` sources, `workflow:` rules and `auto_cancel`
+- Rules, artifacts, caches, services, environments, and other job settings
 
-### AWS CodeBuild Buildspec _(new in v1.2.0 — additional testing in progress)_
-- Build phases (install, pre-build, build, post-build)
+### AWS CodeBuild Buildspec
+- Build phases (install, pre-build, build, post-build) with `on-failure` and `run-as`
+- Batch builds: `build-graph` dependency graph, `build-list`, `build-matrix`, `build-fanout`
 - Runtime versions
 - Artifacts and secondary artifacts
-- Cache configuration
-- Environment variables
+- Cache configuration (`key`, `fallback-keys`, `action`)
+- Environment variables, secrets, shell, and proxy settings
+- Report groups
 
-### Bitbucket Pipelines _(new in v1.2.0 — additional testing in progress)_
+### AWS CodePipeline (CloudFormation)
+- Pipeline stages and actions, grouped by `RunOrder` (parallel actions)
+- V2 pipelines: execution mode, Git triggers, and pipeline variables
+- Stage conditions (`BeforeEntry`, `OnSuccess`, `OnFailure`)
+- `Commands` actions and manual approval actions
+- CodeBuild project resources
+
+### Bitbucket Pipelines
 - Default, branch, PR, tag, and custom pipeline variants
 - Pipeline selector dropdown to switch between named pipelines
-- Parallel step groups
-- Stages and deployment steps
+- Parallel step groups drawn as parallel branches
+- Stages and deployment steps, including manual stages and conditions
 - Pipes (`pipe:`) and agentic steps (`agent:`)
-- Service containers and caches
+- Event triggers (`triggers:`), imported pipelines, and custom pipeline variables
+- Service containers, caches, clone options, and runtime settings
 
 ## Extension Settings
 
@@ -134,8 +146,7 @@ This extension contributes the following settings:
 
 - Very large pipeline files (>1000 lines) may take a moment to render
 - Complex Mermaid diagrams with many dependencies might need horizontal scrolling
-- GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and may not handle all edge cases — please report issues on GitHub
-- If the visualization panel shows a "Scripts Failed to Load" error, check that your machine can reach `cdn.jsdelivr.net` (required for Mermaid and js-yaml)
+- If the visualization panel shows a "Scripts Failed to Load" error, refresh the panel or reinstall the extension (Mermaid and js-yaml are bundled; no internet access is required)
 
 ## Support This Project
 
@@ -150,6 +161,26 @@ If you find this extension helpful:
 ---
 
 ## Release Notes
+
+### 1.5.1
+
+Security:
+- **Mermaid bundled and pinned** — Mermaid 10.9.8 now ships inside the extension instead of loading `mermaid@10` from `cdn.jsdelivr.net`, and the webview Content Security Policy no longer allows any CDN scripts. Diagrams also render offline
+- **Diagram labels escaped** — stage / job names from the YAML can no longer inject HTML into the visualization panel; Mermaid now runs with `securityLevel: 'strict'`
+- Dev dependency `serialize-javascript` updated (GHSA-m5mm-p8h7-m29v)
+
+### 1.5.0
+
+New Features:
+- **Dependency-graph diagrams** — diagrams follow `needs` (GitHub, GitLab), `dependsOn` (Azure), batch `depend-on` (CodeBuild) and Bitbucket parallel groups instead of always drawing a straight line
+- **Bitbucket** — event triggers, agentic steps, imported pipelines, custom pipeline variables, clone / runtime / OIDC / self-hosted runner settings, stage conditions and manual stages
+- **GitLab** — `extends:` and `!reference` resolution, downstream pipelines, `parallel:matrix`, `include:` sources, detailed rules, job `inputs` and conditional `spec:inputs`
+- **AWS CodeBuild** — batch builds (graph, list, matrix, fan-out), phase `on-failure` / `run-as`, cache keys, proxy and report groups
+- **AWS CodePipeline** — parallel actions by `RunOrder`, V2 triggers / variables / execution mode, stage conditions, `Commands` and manual approval actions
+- **GitHub Actions** — reusable workflows, matrix strategies, schedules with time zones, `workflow_dispatch` inputs, environments with `deployment: false`, service `entrypoint` / `command`
+- **Azure DevOps** — deployment job strategies (previously showed no steps), templates and `extends:`, parameters and resources, manual stages and stage / job settings
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list. Tracked in [#34](https://github.com/ThatInfraDba/PipelineVisualizer/issues/34).
 
 ### 1.4.1
 
@@ -239,8 +270,6 @@ New Platform Support:
 
 New Features:
 - **Color Themes** — six built-in themes (dark, light, ocean, forest, sunset, monochrome) configurable via extension settings
-
-> GitLab CI/CD, AWS CodeBuild, and Bitbucket Pipelines support is new and still undergoing testing. Please report any issues.
 
 ### 1.1.0
 
