@@ -2,6 +2,18 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.6.0] - Unreleased
+
+Mermaid 12 upgrade ([#39](https://github.com/ThatInfraDba/PipelineVisualizer/issues/39)).
+
+### Changed
+- **Bundled Mermaid upgraded from 10.9.8 to 12.2.0** — clears the KaTeX advisory (GHSA-238p-pmpm-9mq7) that `npm audit` reported through Mermaid 10; `npm audit` is now clean. The existing `initialize` / `run` calls and generated flowchart syntax work unchanged. The bundled `mermaid.min.js` grows from 3.3 MB to 5.5 MB
+- **Diagram node click handling** — Mermaid 12 prefixes node ids with the diagram id (`mermaid-<n>-flowchart-<id>-<n>` instead of `flowchart-<id>-<n>`); the click-to-scroll lookup in `media/webview.js` now matches both forms
+
+### Security
+- **Diagram labels use Mermaid entity codes** — Mermaid entity-decodes the diagram source and renders labels as HTML, so the HTML-escaped labels from v1.5.1 still became (sanitized) markup inside the diagram: a stage named `<img src=x>` rendered an image element, with `onerror` stripped by strict mode and the load blocked by the CSP. Labels now use Mermaid's `#lt;` / `#gt;` / `#amp;` / `#quot;` / `#35;` codes and render as literal text. Affected Mermaid 10 and 12 alike
+- Double quotes in labels now show as `"` instead of being replaced with `'`
+
 ## [1.5.1] - 2026-10-30
 
 ### Security

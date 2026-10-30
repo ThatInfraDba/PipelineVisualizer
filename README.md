@@ -162,6 +162,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.6.0
+
+- **Mermaid 12** — the bundled diagram library is upgraded from 10.9.8 to 12.2.0, clearing the remaining `npm audit` advisory ([#39](https://github.com/ThatInfraDba/PipelineVisualizer/issues/39))
+- **Diagram labels shown as plain text** — stage / job names containing HTML now display literally inside diagrams instead of being rendered as (sanitized) markup, and double quotes are preserved
+
 ### 1.5.1
 
 Security:

@@ -137,9 +137,9 @@
             const target = e.target.closest('[data-step]');
             if (target) { showStepDetails(target.dataset.step); return; }
             // Diagram nodes — Mermaid runs in strict mode, which ignores `click` callbacks.
-            // Mermaid renders node ids as flowchart-<id>-<n>
+            // Mermaid renders node ids as <diagramId>-flowchart-<id>-<n>; our node ids contain no hyphens
             const node = e.target.closest('.mermaid g.node');
-            const match = node && /^flowchart-(.+)-\d+$/.exec(node.id);
+            const match = node && /flowchart-([^-]+)-\d+$/.exec(node.id);
             if (match && flowchartTargets[match[1]]) scrollToStage(flowchartTargets[match[1]]);
         });
 
@@ -159,6 +159,18 @@
         // incoming edges start from START and nodes without outgoing edges lead to END,
         // so independent nodes render as parallel branches.
         // nodes: [{ id, label, color, scrollTo }]; edges: [[fromId, toId]]
+        // Labels come from the YAML. Mermaid entity-decodes the diagram source and renders labels
+        // as HTML, so HTML entities would still become markup; Mermaid's own #name; codes render
+        // as literal text and keep markup characters out of the page. # goes first.
+        function mermaidLabel(text) {
+            return String(text)
+                .replace(/#/g, '#35;')
+                .replace(/&/g, '#amp;')
+                .replace(/</g, '#lt;')
+                .replace(/>/g, '#gt;')
+                .replace(/"/g, '#quot;');
+        }
+
         const flowchartTargets = {};
         function buildFlowchart(nodes, edges) {
             const ids = new Set(nodes.map(n => n.id));
@@ -185,8 +197,7 @@
             const maxDepth = nodes.reduce((m, n) => Math.max(m, depth[n.id]), 0);
 
             let diagram = `graph ${chooseDirection(maxDepth)}\nSTART([Start])`;
-            // Labels come from the YAML: escape them so they stay text in the page and in the diagram
-            nodes.forEach(n => { diagram += `\n${n.id}["${escapeHtml(String(n.label).replace(/"/g, "'"))}"]`; });
+            nodes.forEach(n => { diagram += `\n${n.id}["${mermaidLabel(n.label)}"]`; });
             diagram += '\nEND([End])';
             if (!nodes.length) { diagram += '\nSTART --> END'; }
             nodes.forEach(n => { if (!hasIncoming.has(n.id)) { diagram += `\nSTART --> ${n.id}`; } });
