@@ -2,6 +2,17 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.5.1] - 2026-10-30
+
+### Security
+- **Mermaid bundled instead of loaded from a CDN** — `src/visualizerPanel.ts` loaded `https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js` (floating major version, no integrity hash), and the CSP allowed scripts from all of `cdn.jsdelivr.net`. Mermaid is now a pinned dev dependency (`10.9.8`), copied to `media/vendor/mermaid.min.js` by the new `vendor` script (run by `compile` and `watch`) and loaded through `asWebviewUri` with the nonce. The CSP is now `script-src 'nonce-…'` only, and the unused `font-src` was removed. Diagrams no longer need internet access
+- **HTML injection through diagram labels** — node labels (stage / job / step names from the YAML) were inserted into the Mermaid block unescaped, then assigned to `innerHTML`, so a name such as `<img …>` became markup in the panel. `buildFlowchart` now HTML-escapes labels
+- **Mermaid `securityLevel: 'strict'`** (was `'loose'`) — Mermaid sanitizes label HTML and ignores `click` callbacks. Diagram node clicks now go through the existing delegated click listener (`flowchartTargets` map) instead of `window.pvScrollTo_*` globals, so click-to-scroll keeps working
+- **Dev dependency** — `serialize-javascript` (through `mocha`) updated to 7.1.3+ (GHSA-m5mm-p8h7-m29v); not shipped in the extension
+
+### Changed
+- "Scripts Failed to Load" error and README Known Issues no longer refer to `cdn.jsdelivr.net`
+
 ## [1.5.0] - 2026-10-19
 
 Platform syntax roll-up ([#34](https://github.com/ThatInfraDba/PipelineVisualizer/issues/34)).

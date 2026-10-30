@@ -135,7 +135,12 @@
                 return;
             }
             const target = e.target.closest('[data-step]');
-            if (target) showStepDetails(target.dataset.step);
+            if (target) { showStepDetails(target.dataset.step); return; }
+            // Diagram nodes — Mermaid runs in strict mode, which ignores `click` callbacks.
+            // Mermaid renders node ids as flowchart-<id>-<n>
+            const node = e.target.closest('.mermaid g.node');
+            const match = node && /^flowchart-(.+)-\d+$/.exec(node.id);
+            if (match && flowchartTargets[match[1]]) scrollToStage(flowchartTargets[match[1]]);
         });
 
         function escapeHtml(text) {
@@ -154,6 +159,7 @@
         // incoming edges start from START and nodes without outgoing edges lead to END,
         // so independent nodes render as parallel branches.
         // nodes: [{ id, label, color, scrollTo }]; edges: [[fromId, toId]]
+        const flowchartTargets = {};
         function buildFlowchart(nodes, edges) {
             const ids = new Set(nodes.map(n => n.id));
             const seen = new Set();
@@ -179,7 +185,8 @@
             const maxDepth = nodes.reduce((m, n) => Math.max(m, depth[n.id]), 0);
 
             let diagram = `graph ${chooseDirection(maxDepth)}\nSTART([Start])`;
-            nodes.forEach(n => { diagram += `\n${n.id}["${String(n.label).replace(/"/g, "'")}"]`; });
+            // Labels come from the YAML: escape them so they stay text in the page and in the diagram
+            nodes.forEach(n => { diagram += `\n${n.id}["${escapeHtml(String(n.label).replace(/"/g, "'"))}"]`; });
             diagram += '\nEND([End])';
             if (!nodes.length) { diagram += '\nSTART --> END'; }
             nodes.forEach(n => { if (!hasIncoming.has(n.id)) { diagram += `\nSTART --> ${n.id}`; } });
@@ -187,11 +194,7 @@
             nodes.forEach(n => { if (!hasOutgoing.has(n.id)) { diagram += `\n${n.id} --> END`; } });
             nodes.forEach(n => {
                 diagram += `\nstyle ${n.id} fill:${n.color},stroke:${n.color},color:#fff`;
-                if (n.scrollTo) {
-                    const handler = 'pvScrollTo_' + n.id;
-                    window[handler] = function() { scrollToStage(n.scrollTo); };
-                    diagram += `\nclick ${n.id} ${handler}`;
-                }
+                if (n.scrollTo) { flowchartTargets[n.id] = n.scrollTo; }
             });
             diagram += `\nlinkStyle default stroke:${themeEdgeColor},stroke-width:2px,fill:none`;
             return `<div class="mermaid-container"><div class="mermaid">${diagram}</div></div>`;
@@ -242,8 +245,8 @@
                 if (typeof mermaid === 'undefined' || typeof jsyaml === 'undefined') {
                     showError(
                         'Scripts Failed to Load',
-                        'Required scripts could not be loaded from the CDN.',
-                        '<strong>Tip:</strong> Check your internet connection and try refreshing. The extension requires access to cdn.jsdelivr.net.'
+                        'The bundled Mermaid or js-yaml scripts could not be loaded.',
+                        '<strong>Tip:</strong> Try refreshing the panel or reinstalling the extension.'
                     );
                     return;
                 }
@@ -252,7 +255,7 @@
                     startOnLoad: false,
                     theme: window.pvConfig.mermaidTheme,
                     themeVariables: window.pvConfig.mermaidThemeVariables,
-                    securityLevel: 'loose',
+                    securityLevel: 'strict',
                     flowchart: { useMaxWidth: true }
                 });
 

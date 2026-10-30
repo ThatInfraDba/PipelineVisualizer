@@ -331,6 +331,7 @@ export class PipelineVisualizerPanel {
 
 	private _getHtmlForWebview(webview: vscode.Webview, parsed: ParsedPipeline, layoutPreference: string, colorTheme: string, fileName: string = ''): string {
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'webview.js'));
+		const mermaidUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'media', 'vendor', 'mermaid.min.js'));
 		const jsYamlUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'node_modules', 'js-yaml', 'dist', 'browser', 'js-yaml.umd.min.js'));
 		const platform = this._detectPlatform(parsed.data, fileName, !!parsed.specHeader);
 		const platformClass = platform === 'github' ? 'github-mode' : '';
@@ -381,9 +382,9 @@ export class PipelineVisualizerPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net ${webview.cspSource}; style-src 'unsafe-inline'; font-src https://cdn.jsdelivr.net;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
     <title>Pipeline Visualization</title>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script nonce="${nonce}" src="${mermaidUri}"></script>
     <script nonce="${nonce}" src="${jsYamlUri}"></script>
     <style>
         :root {
@@ -402,6 +403,7 @@ export class PipelineVisualizerPanel {
         .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin: 30px 0; }
         .info-card { background: ${cardBgValue}; padding: 20px; border-radius: 8px; border-left: 4px solid var(--accent-color); }
         .info-card h3 { margin-top: 0; color: var(--accent-color); font-size: 14px; }
+        .mermaid .node { cursor: pointer; }
         .mermaid-container { background: ${cardBgValue}; padding: 30px; border-radius: 8px; margin: 30px 0; overflow-x: auto; }
         .stage, .job-container { margin: 30px 0; padding: 25px; border-radius: 8px; border: 3px solid var(--vscode-panel-border); transition: box-shadow 0.3s ease; scroll-margin-top: 20px; }
         ${stageCSS}

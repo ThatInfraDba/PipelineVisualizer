@@ -146,7 +146,7 @@ This extension contributes the following settings:
 
 - Very large pipeline files (>1000 lines) may take a moment to render
 - Complex Mermaid diagrams with many dependencies might need horizontal scrolling
-- If the visualization panel shows a "Scripts Failed to Load" error, check that your machine can reach `cdn.jsdelivr.net` (required for Mermaid and js-yaml)
+- If the visualization panel shows a "Scripts Failed to Load" error, refresh the panel or reinstall the extension (Mermaid and js-yaml are bundled; no internet access is required)
 
 ## Support This Project
 
@@ -161,6 +161,13 @@ If you find this extension helpful:
 ---
 
 ## Release Notes
+
+### 1.5.1
+
+Security:
+- **Mermaid bundled and pinned** — Mermaid 10.9.8 now ships inside the extension instead of loading `mermaid@10` from `cdn.jsdelivr.net`, and the webview Content Security Policy no longer allows any CDN scripts. Diagrams also render offline
+- **Diagram labels escaped** — stage / job names from the YAML can no longer inject HTML into the visualization panel; Mermaid now runs with `securityLevel: 'strict'`
+- Dev dependency `serialize-javascript` updated (GHSA-m5mm-p8h7-m29v)
 
 ### 1.5.0
 
