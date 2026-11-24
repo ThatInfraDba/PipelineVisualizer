@@ -162,6 +162,11 @@ If you find this extension helpful:
 
 ## Release Notes
 
+### 1.7.0
+
+- **Mermaid 12.3.0** — the bundled diagram library is updated from 12.2.0
+- **Dev dependency advisories cleared** — `minimatch` and `glob` advisories reported by `npm audit` through `typescript-eslint` and `mocha` are resolved; `npm audit` is clean again. These packages are build / test tools only and are not shipped in the extension
+
 ### 1.6.0
 
 - **Mermaid 12** — the bundled diagram library is upgraded from 10.9.8 to 12.2.0, clearing the remaining `npm audit` advisory ([#39](https://github.com/ThatInfraDba/PipelineVisualizer/issues/39))

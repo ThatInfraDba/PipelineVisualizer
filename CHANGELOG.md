@@ -2,6 +2,19 @@
 
 All notable changes to the "Pipeline Visualizer" extension will be documented in this file.
 
+## [1.7.0] - 2026-11-24
+
+Dependency maintenance; `npm audit` is clean again.
+
+### Changed
+- **Bundled Mermaid upgraded from 12.2.0 to 12.3.0**
+
+### Security
+- **Dev dependencies** — cleared the moderate `minimatch` (GHSA-g3hv-75wg-m249) and `glob` (GHSA-3g3m-2fjr-6pw4) advisories; neither ships in the extension
+  - `typescript-eslint`, `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin` updated to 8.74.0, which use `minimatch` 11.0.1+
+  - `mocha` 12.0.3 (latest) still requires `glob` ^13 and `minimatch` ^10, so `package.json` `overrides` pin them to `glob` ^14.0.2 and `minimatch` ^11.0.1 under `mocha`
+- `eslint` updated to 10.15.0 and `@types/node` to 26.6.6
+
 ## [1.6.0] - 2026-10-30
 
 Mermaid 12 upgrade ([#39](https://github.com/ThatInfraDba/PipelineVisualizer/issues/39)).
